@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import type { Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
-import { MemberForm } from "@/components/MemberForm";
 import { AiProgress } from "@/components/AiProgress";
 
 const SECTIONS: Phase[] = ["answering", "voting", "closed"];
@@ -41,7 +40,11 @@ export default async function HomePage() {
 
       <AiProgress picksCount={picksCount} />
 
-      {user.role === "admin" && <MemberForm />}
+      {user.role === "admin" && (
+        <Link href="/invites" className="block text-sm text-muted hover:text-white">
+          + 招待コードを発行してメンバーを増やす
+        </Link>
+      )}
 
       {odai.length === 0 && (
         <p className="text-sm text-muted">
