@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { supabaseUrl } from "@/lib/supabase/env";
 import { requireMember } from "@/lib/session";
 
 export type ActionState = { error?: string };
@@ -138,5 +139,33 @@ export async function closeVoting(_prev: ActionState, formData: FormData): Promi
 
   revalidatePath(`/odai/${odaiId}`);
   revalidatePath("/");
+  return {};
+}
+
+/** メンバーがアプリ内からメンバーを招待できるようにする。実処理は Supabase Edge Function 側。 */
+export async function inviteMember(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email) return { error: "メールアドレスを入力してください" };
+
+  await requireMember();
+  const supabase = await createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return { error: "ログインが必要です" };
+
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const res = await fetch(`${supabaseUrl()}/functions/v1/invite-member`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ email, redirectTo: siteUrl ? `${siteUrl}/auth/callback` : undefined }),
+  });
+
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) return { error: json.error ?? "招待に失敗しました" };
+
   return {};
 }
