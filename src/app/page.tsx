@@ -5,6 +5,7 @@ import type { Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { InviteForm } from "@/components/InviteForm";
+import { AiProgress } from "@/components/AiProgress";
 
 const SECTIONS: Phase[] = ["answering", "voting", "closed"];
 
@@ -12,16 +13,19 @@ export default async function HomePage() {
   const { user } = await requireMember();
   const supabase = await createClient();
 
-  const [{ data: odaiRows }, { data: myAnswers }, { data: myPicks }] = await Promise.all([
-    supabase.from("odai").select("*").order("created_at", { ascending: false }),
-    // 自分の回答は phase を問わず読める（他人の回答は回答受付中は読めない）
-    supabase.from("answers_view").select("odai_id").eq("is_mine", true),
-    supabase.from("picks").select("odai_id").eq("voter_id", user.id),
-  ]);
+  const [{ data: odaiRows }, { data: myAnswers }, { data: myPicks }, { data: progressRows }] =
+    await Promise.all([
+      supabase.from("odai").select("*").order("created_at", { ascending: false }),
+      // 自分の回答は phase を問わず読める（他人の回答は回答受付中は読めない）
+      supabase.from("answers_view").select("odai_id").eq("is_mine", true),
+      supabase.from("picks").select("odai_id").eq("voter_id", user.id),
+      supabase.rpc("ai_progress_stats"),
+    ]);
 
   const odai = (odaiRows ?? []) as Odai[];
   const answered = new Set((myAnswers ?? []).map((a) => a.odai_id as number));
   const voted = new Set((myPicks ?? []).map((p) => p.odai_id as number));
+  const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
   return (
     <div className="space-y-8">
@@ -34,6 +38,8 @@ export default async function HomePage() {
           お題を出す
         </Link>
       </div>
+
+      <AiProgress picksCount={picksCount} />
 
       <InviteForm />
 
