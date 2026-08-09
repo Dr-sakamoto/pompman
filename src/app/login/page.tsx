@@ -1,17 +1,52 @@
 "use client";
 
 import { useState } from "react";
+import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { ErrorText, Panel } from "@/components/ui";
+
+/**
+ * メールのリンクをタップして別ブラウザ（Gmailのアプリ内ブラウザ等）で開くと、
+ * ログインをリクエストしたブラウザにしかない PKCE の code verifier が見つからず失敗する。
+ * リンクは開かず URL ごとコピーして貼ってもらい、中の token を直接 verifyOtp に渡せば
+ * verifier なしでログインできるので、この問題を回避できる。
+ */
+function extractTokenHash(input: string): { tokenHash: string; type: EmailOtpType } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  try {
+    let url = new URL(trimmed);
+
+    // Gmail 等がリンクをクリック計測用に包んでいる場合があるので、中の URL を掘り出す
+    const wrapped = url.searchParams.get("q") ?? url.searchParams.get("u");
+    if (wrapped) {
+      try {
+        url = new URL(wrapped);
+      } catch {
+        // 包んでいなかった場合はそのまま元の url を使う
+      }
+    }
+
+    const tokenHash = url.searchParams.get("token_hash") ?? url.searchParams.get("token");
+    if (!tokenHash) return null;
+
+    const type = (url.searchParams.get("type") as EmailOtpType | null) ?? "email";
+    return { tokenHash, type };
+  } catch {
+    return null;
+  }
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [link, setLink] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSendLink(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
@@ -33,14 +68,77 @@ export default function LoginPage() {
     }
   }
 
+  async function onVerifyLink(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const parsed = extractTokenHash(link);
+      if (!parsed) {
+        setError("リンクを正しく貼り付けられていないようです");
+        return;
+      }
+
+      const supabase = createClient();
+      const { error } = await supabase.auth.verifyOtp({
+        token_hash: parsed.tokenHash,
+        type: parsed.type,
+      });
+      if (error) throw error;
+
+      // handle 未登録なら requireMember() が /onboarding に飛ばす
+      window.location.href = "/";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ログインできませんでした");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (sent) {
     return (
-      <Panel>
-        <h1 className="mb-2 text-lg font-bold">メールを送りました</h1>
-        <p className="text-sm text-muted">
-          {email} にログイン用のリンクを送りました。同じブラウザで開いてください。
-        </p>
-      </Panel>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold">メールを送りました</h1>
+          <p className="mt-1 text-sm text-muted">
+            {email} にログイン用のリンクを送りました。メールアプリ内でリンクを直接開くと失敗することがあるので、
+            リンクを<strong className="text-white">長押しして「リンクをコピー」</strong>で選び、下の欄に貼り付けてください。
+          </p>
+        </div>
+
+        <Panel>
+          <form onSubmit={onVerifyLink} className="space-y-4">
+            <textarea
+              required
+              rows={3}
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="https://... で始まるリンクを貼り付け"
+              className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+            <button
+              type="submit"
+              disabled={busy || link.trim().length === 0}
+              className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
+            >
+              {busy ? "確認中…" : "この内容でログインする"}
+            </button>
+            <ErrorText message={error} />
+          </form>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSent(false);
+              setLink("");
+              setError(null);
+            }}
+            className="mt-3 text-xs text-muted hover:text-white"
+          >
+            メールアドレスを変更する
+          </button>
+        </Panel>
+      </div>
     );
   }
 
@@ -54,7 +152,7 @@ export default function LoginPage() {
       </div>
 
       <Panel>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSendLink} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium">
               メールアドレス
