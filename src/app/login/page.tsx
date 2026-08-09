@@ -1,18 +1,52 @@
 "use client";
 
 import { useState } from "react";
+import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { ErrorText, Panel } from "@/components/ui";
+
+/**
+ * メールのリンクをタップして別ブラウザ（Gmailのアプリ内ブラウザ等）で開くと、
+ * ログインをリクエストしたブラウザにしかない PKCE の code verifier が見つからず失敗する。
+ * リンクは開かず URL ごとコピーして貼ってもらい、中の token を直接 verifyOtp に渡せば
+ * verifier なしでログインできるので、この問題を回避できる。
+ */
+function extractTokenHash(input: string): { tokenHash: string; type: EmailOtpType } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  try {
+    let url = new URL(trimmed);
+
+    // Gmail 等がリンクをクリック計測用に包んでいる場合があるので、中の URL を掘り出す
+    const wrapped = url.searchParams.get("q") ?? url.searchParams.get("u");
+    if (wrapped) {
+      try {
+        url = new URL(wrapped);
+      } catch {
+        // 包んでいなかった場合はそのまま元の url を使う
+      }
+    }
+
+    const tokenHash = url.searchParams.get("token_hash") ?? url.searchParams.get("token");
+    if (!tokenHash) return null;
+
+    const type = (url.searchParams.get("type") as EmailOtpType | null) ?? "email";
+    return { tokenHash, type };
+  } catch {
+    return null;
+  }
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [agreed, setAgreed] = useState(false);
-  const [code, setCode] = useState("");
+  const [link, setLink] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function onSendCode(e: React.FormEvent) {
+  async function onSendLink(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
@@ -28,28 +62,34 @@ export default function LoginPage() {
       if (error) throw error;
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "コードを送れませんでした");
+      setError(err instanceof Error ? err.message : "ログインリンクを送れませんでした");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onVerifyCode(e: React.FormEvent) {
+  async function onVerifyLink(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
+      const parsed = extractTokenHash(link);
+      if (!parsed) {
+        setError("リンクを正しく貼り付けられていないようです");
+        return;
+      }
+
       const supabase = createClient();
       const { error } = await supabase.auth.verifyOtp({
-        email,
-        token: code.trim(),
-        type: "email",
+        token_hash: parsed.tokenHash,
+        type: parsed.type,
       });
       if (error) throw error;
+
       // handle 未登録なら requireMember() が /onboarding に飛ばす
       window.location.href = "/";
     } catch (err) {
-      setError(err instanceof Error ? err.message : "コードが正しくありません");
+      setError(err instanceof Error ? err.message : "ログインできませんでした");
     } finally {
       setBusy(false);
     }
@@ -59,30 +99,29 @@ export default function LoginPage() {
     return (
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold">確認コードを入力</h1>
+          <h1 className="text-2xl font-bold">メールを送りました</h1>
           <p className="mt-1 text-sm text-muted">
-            {email} に届いた6桁のコードを入力してください。メール内のリンクを開いても構いません。
+            {email} にログイン用のリンクを送りました。メールアプリ内でリンクを直接開くと失敗することがあるので、
+            リンクを<strong className="text-white">長押しして「リンクをコピー」</strong>で選び、下の欄に貼り付けてください。
           </p>
         </div>
 
         <Panel>
-          <form onSubmit={onVerifyCode} className="space-y-4">
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
+          <form onSubmit={onVerifyLink} className="space-y-4">
+            <textarea
               required
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="123456"
-              className="w-full rounded-md border border-line bg-ink px-3 py-2 text-center text-lg tracking-widest outline-none focus:border-accent"
+              rows={3}
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="https://... で始まるリンクを貼り付け"
+              className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 text-sm outline-none focus:border-accent"
             />
             <button
               type="submit"
-              disabled={busy || code.trim().length === 0}
+              disabled={busy || link.trim().length === 0}
               className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
             >
-              {busy ? "確認中…" : "ログインする"}
+              {busy ? "確認中…" : "この内容でログインする"}
             </button>
             <ErrorText message={error} />
           </form>
@@ -91,7 +130,7 @@ export default function LoginPage() {
             type="button"
             onClick={() => {
               setSent(false);
-              setCode("");
+              setLink("");
               setError(null);
             }}
             className="mt-3 text-xs text-muted hover:text-white"
@@ -108,12 +147,12 @@ export default function LoginPage() {
       <div>
         <h1 className="text-2xl font-bold">ログイン</h1>
         <p className="mt-1 text-sm text-muted">
-          招待制です。メールアドレスに確認コードを送ります（パスワードはありません）。
+          招待制です。メールアドレスにログイン用のリンクを送ります（パスワードはありません）。
         </p>
       </div>
 
       <Panel>
-        <form onSubmit={onSendCode} className="space-y-4">
+        <form onSubmit={onSendLink} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium">
               メールアドレス
@@ -151,7 +190,7 @@ export default function LoginPage() {
             disabled={busy || !agreed}
             className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
           >
-            {busy ? "送信中…" : "確認コードを送る"}
+            {busy ? "送信中…" : "ログインリンクを送る"}
           </button>
 
           <ErrorText message={error} />
