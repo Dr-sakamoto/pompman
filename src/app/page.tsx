@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
-import { InviteForm } from "@/components/InviteForm";
+import { MemberForm } from "@/components/MemberForm";
 import { AiProgress } from "@/components/AiProgress";
 
 const SECTIONS: Phase[] = ["answering", "voting", "closed"];
@@ -41,7 +41,7 @@ export default async function HomePage() {
 
       <AiProgress picksCount={picksCount} />
 
-      <InviteForm />
+      {user.role === "admin" && <MemberForm />}
 
       {odai.length === 0 && (
         <p className="text-sm text-muted">

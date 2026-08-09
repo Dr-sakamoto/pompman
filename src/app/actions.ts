@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseUrl } from "@/lib/supabase/env";
-import { requireMember } from "@/lib/session";
+import { requireAdmin, requireMember } from "@/lib/session";
 
 export type ActionState = { error?: string };
 
@@ -142,30 +142,44 @@ export async function closeVoting(_prev: ActionState, formData: FormData): Promi
   return {};
 }
 
-/** メンバーがアプリ内からメンバーを招待できるようにする。実処理は Supabase Edge Function 側。 */
-export async function inviteMember(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const email = String(formData.get("email") ?? "").trim();
-  if (!email) return { error: "メールアドレスを入力してください" };
+export type MemberActionState = ActionState & {
+  done?: boolean;
+  created?: boolean;
+  email?: string;
+};
 
-  await requireMember();
+/**
+ * 管理者がメンバーのアカウントを作る／パスワードを変更する。
+ * 実処理（service role が要る操作）は Supabase Edge Function 側。
+ */
+export async function upsertMember(
+  _prev: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  if (!email) return { error: "メールアドレスを入力してください" };
+  if (password.length < 8) return { error: "パスワードは8文字以上にしてください" };
+
+  await requireAdmin();
   const supabase = await createClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session) return { error: "ログインが必要です" };
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
   const res = await fetch(`${supabaseUrl()}/functions/v1/invite-member`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ email, redirectTo: siteUrl ? `${siteUrl}/auth/callback` : undefined }),
+    body: JSON.stringify({ email, password }),
   });
 
-  const json = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) return { error: json.error ?? "招待に失敗しました" };
+  const json = (await res.json().catch(() => ({}))) as { error?: string; created?: boolean };
+  if (!res.ok) return { error: json.error ?? "登録に失敗しました" };
 
-  return {};
+  revalidatePath("/members");
+  return { done: true, created: json.created ?? false, email };
 }
