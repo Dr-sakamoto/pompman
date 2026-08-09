@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
+import { InviteForm } from "@/components/InviteForm";
 
 const SECTIONS: Phase[] = ["answering", "voting", "closed"];
 
@@ -33,6 +34,8 @@ export default async function HomePage() {
           お題を出す
         </Link>
       </div>
+
+      <InviteForm />
 
       {odai.length === 0 && (
         <p className="text-sm text-muted">
