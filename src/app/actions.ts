@@ -142,6 +142,28 @@ export async function closeVoting(_prev: ActionState, formData: FormData): Promi
   return {};
 }
 
+export type IssueCodesState = ActionState & { codes?: string[] };
+
+/** 招待コードを発行する。実際の発行と admin チェックは DB 関数側。 */
+export async function issueInviteCodes(
+  _prev: IssueCodesState,
+  formData: FormData,
+): Promise<IssueCodesState> {
+  const count = Number(formData.get("count"));
+  if (!Number.isInteger(count) || count < 1 || count > 20) {
+    return { error: "発行数は1〜20で指定してください" };
+  }
+
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("create_invite_codes", { p_count: count });
+  if (error) return { error: error.message };
+
+  revalidatePath("/invites");
+  return { codes: (data ?? []) as string[] };
+}
+
 export type MemberActionState = ActionState & {
   done?: boolean;
   created?: boolean;
@@ -181,5 +203,6 @@ export async function upsertMember(
   if (!res.ok) return { error: json.error ?? "登録に失敗しました" };
 
   revalidatePath("/members");
+  revalidatePath("/invites");
   return { done: true, created: json.created ?? false, email };
 }
