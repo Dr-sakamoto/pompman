@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
+import { useActionState, useState } from "react";
+import { signup, type ActionState } from "@/app/actions";
 import { ErrorText, Panel } from "@/components/ui";
 
 /**
@@ -11,47 +10,16 @@ import { ErrorText, Panel } from "@/components/ui";
  * 管理者は 4 桁のコードを配るだけで、メールアドレスとパスワードは本人が決める。
  * 引き換えは Edge Function (verify_jwt: false) 側で、コードの原子的な確保と
  * ユーザー作成をまとめて行う。
+ *
+ * 引き換え・ログインはどちらも Server Action（signup）で行う。クライアント側で
+ * signInWithPassword() を呼んでから window.location.href で遷移する方式だと
+ * セッション Cookie の書き込みとハードナビゲーションが競合し、ログインした
+ * はずなのに毎回ログイン画面に戻される不具合があったため。
  */
 export default function SignupPage() {
+  const [state, action, pending] = useActionState<ActionState, FormData>(signup, {});
   const [code, setCode] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await fetch(`${supabaseUrl()}/functions/v1/redeem-invite-code`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // verify_jwt: false だが、Edge Function のゲートウェイは apikey を要求する
-          apikey: supabaseAnonKey(),
-        },
-        body: JSON.stringify({ code: code.trim(), email: email.trim(), password }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "登録に失敗しました");
-
-      // 作成できたので、そのままログインして表示名の登録へ進む
-      const supabase = createClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (signInError) throw signInError;
-
-      window.location.href = "/";
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "登録に失敗しました");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="space-y-4">
@@ -63,13 +31,14 @@ export default function SignupPage() {
       </div>
 
       <Panel>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form action={action} className="space-y-4">
           <div>
             <label htmlFor="code" className="mb-1 block text-sm font-medium">
               招待コード
             </label>
             <input
               id="code"
+              name="code"
               type="text"
               inputMode="numeric"
               required
@@ -89,11 +58,10 @@ export default function SignupPage() {
             </label>
             <input
               id="email"
+              name="email"
               type="email"
               required
               autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
               placeholder="you@example.com"
             />
@@ -105,12 +73,11 @@ export default function SignupPage() {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
               required
               minLength={8}
               autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
               placeholder="8文字以上"
             />
@@ -138,13 +105,13 @@ export default function SignupPage() {
 
           <button
             type="submit"
-            disabled={busy || !agreed}
+            disabled={pending || !agreed}
             className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
           >
-            {busy ? "登録中…" : "登録する"}
+            {pending ? "登録中…" : "登録する"}
           </button>
 
-          <ErrorText message={error} />
+          <ErrorText message={state.error} />
         </form>
       </Panel>
 
