@@ -3,10 +3,68 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { supabaseUrl } from "@/lib/supabase/env";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 import { requireAdmin, requireMember } from "@/lib/session";
 
 export type ActionState = { error?: string };
+
+/**
+ * メール + パスワードでログインする。
+ *
+ * クライアント側で signInWithPassword() を呼んで window.location.href で
+ * 遷移する方式だと、Cookie の書き込み（document.cookie）と直後のハード
+ * ナビゲーションのタイミングが競合し、特にモバイルブラウザで Cookie が
+ * 反映されないままリダイレクトされ、ログインしたはずなのに毎回ログイン
+ * 画面に戻される不具合があった。Server Action で行えば、セッション
+ * Cookie はレスポンスの Set-Cookie として確実に書き込まれる。
+ */
+export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  if (!email || !password) {
+    return { error: "メールアドレスとパスワードを入力してください" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    return {
+      error:
+        error.message === "Invalid login credentials"
+          ? "メールアドレスまたはパスワードが違います"
+          : error.message,
+    };
+  }
+
+  redirect("/");
+}
+
+/**
+ * 招待コードを引き換えてアカウントを作り、そのままログインする。
+ * login() と同じ理由で Server Action にしている（Cookie 書き込みの確実性）。
+ */
+export async function signup(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const code = String(formData.get("code") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+
+  const res = await fetch(`${supabaseUrl()}/functions/v1/redeem-invite-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: supabaseAnonKey(),
+    },
+    body: JSON.stringify({ code, email, password }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) return { error: json.error ?? "登録に失敗しました" };
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { error: error.message };
+
+  redirect("/");
+}
 
 /** サインアップ直後の handle 登録。ここで学習利用への同意も記録する。 */
 export async function registerHandle(

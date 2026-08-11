@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useActionState, useState } from "react";
+import { login, type ActionState } from "@/app/actions";
 import { ErrorText, Panel } from "@/components/ui";
 
 /**
@@ -10,37 +10,15 @@ import { ErrorText, Panel } from "@/components/ui";
  * マジックリンク（メール送信）はメールアプリ・ブラウザの組み合わせで壊れやすく、
  * SMTP の運用も必要になるのでやめた。アカウントは管理者が作り、パスワードは
  * 管理者から本人へ直接渡す。認証メールは一通も送らない。
+ *
+ * ログイン処理は Server Action（login）で行う。クライアント側で
+ * signInWithPassword() を呼んでから window.location.href で遷移する方式だと
+ * セッション Cookie の書き込みとハードナビゲーションが競合し、ログインした
+ * はずなのに毎回ログイン画面に戻される不具合があったため。
  */
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [state, action, pending] = useActionState<ActionState, FormData>(login, {});
   const [agreed, setAgreed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-
-      // handle 未登録なら requireMember() が /onboarding に飛ばす
-      window.location.href = "/";
-    } catch (err) {
-      setError(
-        err instanceof Error && err.message === "Invalid login credentials"
-          ? "メールアドレスまたはパスワードが違います"
-          : err instanceof Error
-            ? err.message
-            : "ログインできませんでした",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="space-y-4">
@@ -52,18 +30,17 @@ export default function LoginPage() {
       </div>
 
       <Panel>
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form action={action} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium">
               メールアドレス
             </label>
             <input
               id="email"
+              name="email"
               type="email"
               required
               autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
               placeholder="you@example.com"
             />
@@ -75,11 +52,10 @@ export default function LoginPage() {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
               required
               autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
             />
           </div>
@@ -103,13 +79,13 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={busy || !agreed}
+            disabled={pending || !agreed}
             className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
           >
-            {busy ? "確認中…" : "ログイン"}
+            {pending ? "確認中…" : "ログイン"}
           </button>
 
-          <ErrorText message={error} />
+          <ErrorText message={state.error} />
         </form>
       </Panel>
 
