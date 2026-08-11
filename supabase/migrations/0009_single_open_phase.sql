@@ -19,7 +19,30 @@
 --   * answers は UPDATE も DELETE もできない（0票の回答も資産）
 --   * ベスト3選出（絶対評価にはしない）
 --   * 結果発表まで author_id は自分の回答以外 null
+--
+-- このマイグレーションは 0007_auto_close_answers.sql / 0008_answering_progress.sql
+-- と並行で作られたブランチをマージしたもの。あちらは「回答受付フェーズを、
+-- 全員回答 or 3日経過で自動的に投票フェーズへ進める」機能で、
+--   * 回答者数と登録メンバー数を比べる（＝1人1回答が前提）
+--   * answering → voting という遷移がある（＝この2つを1つの open に畳む前提）
+-- の両方に依存している。どちらも本マイグレーションで崩すので、そのまま両立しない。
+-- 0番でその機能一式を先に撤去してから、本題の畳み込みに入る。
 -- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 0. 0007_auto_close_answers.sql / 0008_answering_progress.sql の撤去
+--
+-- 「全員回答 or 3日経過で自動的に次のフェーズへ」という発想自体は次点で
+-- 検討する価値があるが、1人1回答前提の実装をそのまま延命させると
+-- 「回答者数 == 登録メンバー数」という誤った判定が残ってしまう。
+-- 一旦撤去し、必要になったら open/closed の2フェーズに合わせて作り直す。
+-- ----------------------------------------------------------------------------
+
+drop trigger if exists answers_maybe_close_after_insert on public.answers;
+drop function if exists private.answers_maybe_close_after_insert();
+drop function if exists private.maybe_close_answers(bigint);
+drop function if exists public.sweep_answer_deadlines();
+drop function if exists public.answering_progress(bigint);
 
 -- ----------------------------------------------------------------------------
 -- 1. フェーズ: answering / voting / closed → open / closed
