@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { supabaseAnonKey, supabaseUrl } from "./env";
+import { AUTH_COOKIE_OPTIONS } from "./cookies";
 
 /**
  * 1リクエストにつき1個だけ作って使い回す（React の cache）。
@@ -17,6 +18,7 @@ export const createClient = cache(async () => {
   const cookieStore = await cookies();
 
   return createServerClient(supabaseUrl(), supabaseAnonKey(), {
+    cookieOptions: AUTH_COOKIE_OPTIONS,
     cookies: {
       getAll() {
         return cookieStore.getAll();

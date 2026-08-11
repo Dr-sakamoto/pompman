@@ -11,10 +11,13 @@ export function ClosedPhase({
   handles: Record<string, string>;
 }) {
   const results = tally(answers, picks);
+  const voters = new Set(picks.map((p) => p.voter_id)).size;
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted">1位=3点 / 2位=2点 / 3位=1点</p>
+      <p className="text-sm text-muted">
+        回答 {answers.length}件 / 採点した人 {voters}人 ・ 1位=3点 / 2位=2点 / 3位=1点
+      </p>
 
       <ul className="space-y-3">
         {results.map(({ answer, score, picks: got }, i) => (

@@ -38,28 +38,29 @@ export function tally(answers: AnswerView[], picks: Pick[]): AnswerResult[] {
     .sort((a, b) => b.score - a.score || a.answer.id - b.answer.id);
 }
 
-/**
- * 投票画面の並び順。投稿順のままだと先に出した人が有利になるのでシャッフルする。
- * ただしリロードのたびに並びが変わると選びかけの投票が破綻するので、
- * (お題, 投票者) で決まる固定の並びにしてある。
- */
-export function seededShuffle<T>(items: T[], seed: string): T[] {
+function hash32(s: string): number {
   let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  const next = () => {
-    h ^= h << 13;
-    h ^= h >>> 17;
-    h ^= h << 5;
-    return ((h >>> 0) % 100000) / 100000;
-  };
+  return h >>> 0;
+}
 
-  const out = items.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
+/**
+ * 採点画面の並び順。投稿順のままだと先に出した人が有利になるので散らす。
+ *
+ * 並びは「行ごとのハッシュ」で決める。配列をシャッフルする方式だと、回答が
+ * 1件増えただけで既存の回答の並びまで全部変わってしまう。回答受付と採点が
+ * 同じフェーズになった今、それは選びかけの画面が目の前で組み替わることを
+ * 意味する。行ごとに順番が決まっていれば、増えた回答が間に挿さるだけで済む。
+ *
+ * seed に採点者を含めるので、並びは人によって違う。
+ */
+export function seededOrder<T>(items: T[], seed: string, keyOf: (item: T) => number): T[] {
+  return items
+    .map((item) => ({ item, key: keyOf(item) }))
+    .map((x) => ({ ...x, h: hash32(`${seed}:${x.key}`) }))
+    .sort((a, b) => a.h - b.h || a.key - b.key)
+    .map((x) => x.item);
 }

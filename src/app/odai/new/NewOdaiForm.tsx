@@ -26,7 +26,7 @@ export function NewOdaiForm() {
             className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
           />
           <p className="text-xs text-muted">
-            回答は、全員が回答するか3日経つと自動で締め切られて投票に進みます。早めに締め切りたいときは自分で操作もできます。
+            回答と採点は同時に進みます。締め切って結果を発表するのは、あなた自身の操作です。
           </p>
           <button
             type="submit"

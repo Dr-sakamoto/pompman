@@ -3,10 +3,8 @@ import { notFound } from "next/navigation";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { AnswerView, AppUser, Odai, Pick } from "@/lib/types";
-import { isPastAnswerDeadline } from "@/lib/types";
 import { PhaseBadge } from "@/components/ui";
-import { AnsweringPhase } from "./AnsweringPhase";
-import { VotingPhase } from "./VotingPhase";
+import { OpenPhase } from "./OpenPhase";
 import { ClosedPhase } from "./ClosedPhase";
 
 export default async function OdaiPage({ params }: { params: Promise<{ id: string }> }) {
@@ -15,59 +13,39 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   if (!Number.isInteger(odaiId)) notFound();
 
   const supabase = await createClient();
-  const getOdai = () => supabase.from("odai").select("*").eq("id", odaiId).maybeSingle();
-  // 回答受付中は RLS により自分の回答しか返ってこない。
-  const listAnswers = () =>
-    supabase
-      .from("answers_view")
-      .select("*")
-      .eq("odai_id", odaiId)
-      .order("created_at", { ascending: true });
 
   /*
-   * 以前は requireMember() → sweep RPC → odai 取得 → 残りのクエリ、と
-   * 4段階に分けて直列に待っていた。互いの結果に依存していないので同時に投げる。
-   * answering_progress だけは phase を見てから呼んでいたが、件数と人数を返す
-   * だけの RPC なので回答受付中以外に呼んでも害はない（migrations/0008 参照）。
+   * requireMember() と odai・回答・picks・users・回答数のクエリは互いの結果に
+   * 依存していないので、直列に待たず同時に投げる。
    */
-  const [{ user }, odaiRes, answersRes, { data: pickRows }, { data: userRows }, { data: progressRows }] =
+  const [{ user }, { data: odaiRow }, { data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }] =
     await Promise.all([
       requireMember(),
-      getOdai(),
-      listAnswers(),
-      // 結果公開前は自分の picks しか返ってこない。
+      supabase.from("odai").select("*").eq("id", odaiId).maybeSingle(),
+      // 自分が回答するまで、他人の回答は1行も返ってこない（answers_view）。
+      // 結果発表前は author_id も伏せられている。
+      supabase
+        .from("answers_view")
+        .select("*")
+        .eq("odai_id", odaiId)
+        .order("created_at", { ascending: true }),
+      // 結果発表前は自分の picks しか返ってこない。
       supabase.from("picks").select("*").eq("odai_id", odaiId),
       supabase.from("users").select("*"),
-      supabase.rpc("answering_progress", { p_odai_id: odaiId }),
+      // 件数は中身を含まないので、解禁前でも見せる。
+      supabase.rpc("odai_answer_counts"),
     ]);
 
-  if (!odaiRes.data) notFound();
-  let odai = odaiRes.data as Odai;
-  let answers = (answersRes.data ?? []) as AnswerView[];
-
-  /*
-   * 経過日数による自動締め切り。期限切れのお題を開いたときだけ掃除する
-   * （isPastAnswerDeadline 参照）。voting に進むと他人の回答も読めるように
-   * なるので、掃除したら回答も取り直す。
-   */
-  if (odai.phase === "answering" && isPastAnswerDeadline(odai.created_at)) {
-    await supabase.rpc("sweep_answer_deadlines");
-    const [sweptOdai, sweptAnswers] = await Promise.all([getOdai(), listAnswers()]);
-    if (sweptOdai.data) {
-      odai = sweptOdai.data as Odai;
-      answers = (sweptAnswers.data ?? []) as AnswerView[];
-    }
-  }
-
+  if (!odaiRow) notFound();
+  const odai = odaiRow as Odai;
+  const answers = (answerRows ?? []) as AnswerView[];
   const picks = (pickRows ?? []) as Pick[];
   const handles = new Map(((userRows ?? []) as AppUser[]).map((u) => [u.id, u.handle]));
+  const answerCount =
+    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).find(
+      (r) => r.odai_id === odaiId,
+    )?.answer_count ?? 0;
   const isOwner = odai.author_id === user.id;
-  const progressRow = progressRows?.[0] as
-    | { answer_count: number; member_count: number }
-    | undefined;
-  const progress = progressRow
-    ? { answerCount: progressRow.answer_count, memberCount: progressRow.member_count }
-    : null;
 
   return (
     <div className="space-y-6">
@@ -83,19 +61,11 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         </p>
       </div>
 
-      {odai.phase === "answering" && (
-        <AnsweringPhase
-          odai={odai}
-          myAnswer={answers.find((a) => a.is_mine) ?? null}
-          isOwner={isOwner}
-          progress={progress}
-        />
-      )}
-
-      {odai.phase === "voting" && (
-        <VotingPhase
+      {odai.phase === "open" && (
+        <OpenPhase
           odai={odai}
           answers={answers}
+          answerCount={answerCount}
           myPicks={picks.filter((p) => p.voter_id === user.id)}
           voterId={user.id}
           isOwner={isOwner}

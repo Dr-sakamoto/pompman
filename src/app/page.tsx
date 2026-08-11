@@ -2,46 +2,55 @@ import Link from "next/link";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { Odai, Phase } from "@/lib/types";
-import { isPastAnswerDeadline, PHASE_LABEL } from "@/lib/types";
+import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 
-const SECTIONS: Phase[] = ["answering", "voting", "closed"];
+const SECTIONS: Phase[] = ["open", "closed"];
 
 export default async function HomePage() {
   const supabase = await createClient();
-  const listOdai = () => supabase.from("odai").select("*").order("created_at", { ascending: false });
 
   /*
-   * 以前は requireMember() → sweep RPC → 一覧のクエリ、と3段階に分けて
-   * 直列に待っていた。どれも互いの結果に依存していないので、まとめて
-   * 同時に投げる（sweep は下で必要なときだけ）。
+   * requireMember() と一覧系のクエリは互いの結果に依存していないので、
+   * 直列に待たず同時に投げる。
    */
-  const [{ user }, { data: odaiRows }, { data: myAnswers }, { data: pickRows }, { data: progressRows }] =
-    await Promise.all([
-      requireMember(),
-      listOdai(),
-      // 自分の回答は phase を問わず読める（他人の回答は回答受付中は読めない）
-      supabase.from("answers_view").select("odai_id").eq("is_mine", true),
-      // RLS により、結果公開前は自分の picks しか返らない。voter_id で絞るのは
-      // 受け取ってから（user.id を待たずにこのクエリを投げるため）。
-      supabase.from("picks").select("odai_id, voter_id"),
-      supabase.rpc("ai_progress_stats"),
-    ]);
+  const [
+    { user },
+    { data: odaiRows },
+    { data: myAnswers },
+    { data: countRows },
+    { data: myPicks },
+    { data: progressRows },
+  ] = await Promise.all([
+    requireMember(),
+    supabase.from("odai").select("*").order("created_at", { ascending: false }),
+    // 自分の回答はいつでも読める（他人の回答は自分が回答するまで読めない）。
+    supabase.from("answers_view").select("odai_id").eq("is_mine", true),
+    // 回答数は件数だけなので、まだ回答していないお題の分も出る。
+    supabase.rpc("odai_answer_counts"),
+    // RLS により、結果発表前は自分の picks しか返らない。voter_id での絞り込みは
+    // 受け取ってから行う（requireMember() の結果である user.id を、それがまだ
+    // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
+    supabase.from("picks").select("odai_id, voter_id"),
+    supabase.rpc("ai_progress_stats"),
+  ]);
 
-  let odai = (odaiRows ?? []) as Odai[];
-
-  // 経過日数による自動締め切りは呼び出しトリガーがないので、表示のたびに掃除する。
-  // ただし期限を過ぎたお題が実際に見えているときだけでいい（isPastAnswerDeadline 参照）。
-  if (odai.some((o) => o.phase === "answering" && isPastAnswerDeadline(o.created_at))) {
-    await supabase.rpc("sweep_answer_deadlines");
-    const { data } = await listOdai();
-    odai = (data ?? odaiRows ?? []) as Odai[];
+  const odai = (odaiRows ?? []) as Odai[];
+  const myAnswerCount = new Map<number, number>();
+  for (const a of (myAnswers ?? []) as { odai_id: number }[]) {
+    myAnswerCount.set(a.odai_id, (myAnswerCount.get(a.odai_id) ?? 0) + 1);
   }
-
-  const answered = new Set((myAnswers ?? []).map((a) => a.odai_id as number));
-  const voted = new Set(
-    (pickRows ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
+  const answerCount = new Map(
+    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).map((r) => [
+      r.odai_id,
+      Number(r.answer_count),
+    ]),
+  );
+  const scored = new Set(
+    (myPicks ?? [])
+      .filter((p) => p.voter_id === user.id)
+      .map((p) => p.odai_id as number),
   );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
@@ -80,10 +89,17 @@ export default async function HomePage() {
             <h2 className="text-sm font-bold text-muted">{PHASE_LABEL[phase]}</h2>
             <ul className="space-y-2">
               {rows.map((o) => {
+                const count = answerCount.get(o.id) ?? 0;
+                const mine = myAnswerCount.get(o.id) ?? 0;
                 const todo =
-                  (o.phase === "answering" && !answered.has(o.id) && "未回答") ||
-                  (o.phase === "voting" && !voted.has(o.id) && "未投票") ||
-                  null;
+                  o.phase !== "open"
+                    ? null
+                    : mine === 0
+                      ? "未回答"
+                      : // 他人の回答が1つも無いうちは採点できないので急かさない
+                        count > mine && !scored.has(o.id)
+                        ? "未採点"
+                        : null;
 
                 return (
                   <li key={o.id}>
@@ -96,6 +112,7 @@ export default async function HomePage() {
                       <div className="mb-2 flex items-center gap-2">
                         <PhaseBadge phase={o.phase} />
                         {todo && <TodoBadge>{todo}</TodoBadge>}
+                        <span className="ml-auto text-xs text-muted">回答 {count}件</span>
                       </div>
                       <p className="font-medium">{o.text}</p>
                     </Link>
