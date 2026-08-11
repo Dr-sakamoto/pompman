@@ -172,6 +172,24 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
   return {};
 }
 
+/**
+ * 「出し切ったので他人の回答を見る」を宣言する。片道切符で、以後このお題には
+ * 回答を追加できなくなる（判定は DB 側）。
+ */
+export async function unlockAnswers(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const odaiId = Number(formData.get("odai_id"));
+  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
+
+  await requireMember();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("unlock_answers", { p_odai_id: odaiId });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/odai/${odaiId}`);
+  revalidatePath("/");
+  return {};
+}
+
 /** 回答・採点を締め切って結果を発表する。出題者だけが呼べる（判定は DB 側）。 */
 export async function closeOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));

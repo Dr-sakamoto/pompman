@@ -23,9 +23,9 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   if (!odaiRow) notFound();
   const odai = odaiRow as Odai;
 
-  const [{ data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }] =
+  const [{ data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }, { data: unlockRow }] =
     await Promise.all([
-      // 自分が回答するまで、他人の回答は1行も返ってこない（answers_view）。
+      // 解禁する（unlock_answers）まで、他人の回答は1行も返ってこない（answers_view）。
       // 結果発表前は author_id も伏せられている。
       supabase
         .from("answers_view")
@@ -37,6 +37,14 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       supabase.from("users").select("*"),
       // 件数は中身を含まないので、解禁前でも見せる。
       supabase.rpc("odai_answer_counts"),
+      // 自分がこのお題を解禁済みかどうか（未解禁だと answers_view が自分の分しか返らないので、
+      // 「まだ誰も他に回答していない」のか「単に未解禁」なのかを区別するのに要る）。
+      supabase
+        .from("answer_unlocks")
+        .select("odai_id")
+        .eq("odai_id", odaiId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
     ]);
 
   const answers = (answerRows ?? []) as AnswerView[];
@@ -46,6 +54,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     ((countRows ?? []) as { odai_id: number; answer_count: number }[]).find(
       (r) => r.odai_id === odaiId,
     )?.answer_count ?? 0;
+  const unlocked = unlockRow !== null;
   const isOwner = odai.author_id === user.id;
 
   return (
@@ -67,6 +76,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
           odai={odai}
           answers={answers}
           answerCount={answerCount}
+          unlocked={unlocked}
           myPicks={picks.filter((p) => p.voter_id === user.id)}
           voterId={user.id}
           isOwner={isOwner}
