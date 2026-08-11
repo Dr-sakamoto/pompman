@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "./supabase/server";
+import { getUserResilient } from "./supabase/auth";
 import type { AppUser } from "./types";
 
 /**
@@ -8,9 +9,13 @@ import type { AppUser } from "./types";
  */
 export async function requireMember(): Promise<{ user: AppUser; authId: string }> {
   const supabase = await createClient();
-  const {
-    data: { user: authUser },
-  } = await supabase.auth.getUser();
+  const { user: authUser, networkFailure } = await getUserResilient(supabase);
+
+  // 通信できなかっただけならログイン画面には飛ばさない。
+  // セッション自体は生きているので、エラーにして再読み込みさせる。
+  if (networkFailure) {
+    throw new Error("認証サーバーに接続できませんでした。通信環境を確認して再読み込みしてください。");
+  }
 
   if (!authUser) redirect("/login");
 

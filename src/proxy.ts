@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
+import { getUserResilient, hasAuthCookie } from "@/lib/supabase/auth";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
@@ -25,12 +26,18 @@ export default async function proxy(request: NextRequest) {
   });
 
   // getUser() を呼ぶことでセッションが更新され、Cookie が書き戻される。
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Cookie が無いなら問い合わせるまでもなく未ログイン。
+  const signedIn = hasAuthCookie(request.cookies.getAll());
+  const { user, networkFailure } = signedIn
+    ? await getUserResilient(supabase)
+    : { user: null, networkFailure: false };
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+  // Supabase に届かなかっただけの場合はログアウトさせない。
+  // ここで飛ばすと、復帰直後の一瞬の通信失敗でログイン画面に戻されてしまう。
+  if (networkFailure) return response;
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
