@@ -45,7 +45,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja">
       <body className="min-h-screen antialiased">
         <RegisterServiceWorker />
-        <header className="border-b border-line">
+        <header
+          className="border-b border-line"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
           <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
             <Link href="/" className="text-lg font-bold tracking-tight">
               大喜利
@@ -63,7 +66,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-2xl px-4 py-6">{children}</main>
+        <main
+          className="mx-auto max-w-2xl px-4 py-6"
+          style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+        >
+          {children}
+        </main>
       </body>
     </html>
   );
