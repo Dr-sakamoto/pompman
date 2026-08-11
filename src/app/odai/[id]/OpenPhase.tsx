@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { closeOdai, submitAnswer, submitPicks, type ActionState } from "@/app/actions";
+import { closeOdai, submitAnswer, submitPicks, unlockAnswers, type ActionState } from "@/app/actions";
 import { ErrorText, Panel } from "@/components/ui";
 import { seededOrder } from "@/lib/scoring";
 import { MAX_ANSWERS_PER_ODAI, MAX_PICKS, type AnswerView, type Odai, type Pick } from "@/lib/types";
@@ -12,9 +12,11 @@ const RANK_LABEL = ["1位", "2位", "3位"];
 /**
  * 回答と採点が同居するフェーズ。
  *
- * ただし他人の回答は「自分が回答するまで」見えない（DB 側で担保）。
- * 他人の回答を見てから書くと引きずられた回答が混ざり、教師データとして劣化するため。
- * 回答を1つ出せばその場で全部見えて、そのまま採点できる。
+ * 他人の回答は「自分が解禁する」まで見えない（DB 側で担保）。解禁は
+ * 「もう出し切った」という明示的な操作で、片道切符 —— 解禁した瞬間に
+ * 全回答が見えて採点できるようになる代わりに、そのお題への回答追加は
+ * できなくなる。書ける分をすべて書き終えてから解禁することで、
+ * 「そのお題に書いたすべての回答が他人を見る前に書かれている」が保証される。
  *
  * 誰が書いたかは結果発表まで伏せたまま。採点（picks）も結果発表まで他人には見えない。
  */
@@ -22,6 +24,7 @@ export function OpenPhase({
   odai,
   answers,
   answerCount,
+  unlocked,
   myPicks,
   voterId,
   isOwner,
@@ -29,6 +32,7 @@ export function OpenPhase({
   odai: Odai;
   answers: AnswerView[];
   answerCount: number;
+  unlocked: boolean;
   myPicks: Pick[];
   voterId: string;
   isOwner: boolean;
@@ -40,9 +44,7 @@ export function OpenPhase({
   );
 
   const myAnswerCount = answers.filter((a) => a.is_mine).length;
-  // 回答していないうちは answers に他人の行が入ってこない（＝ロック中）。
-  const unlocked = myAnswerCount > 0;
-  const pickable = answers.length - myAnswerCount;
+  const pickable = unlocked ? answers.length - myAnswerCount : 0;
   const maxPicks = Math.min(MAX_PICKS, pickable);
 
   return (
@@ -50,24 +52,15 @@ export function OpenPhase({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span className="font-bold">回答 {answerCount}件</span>
         <span className="text-muted">
-          {unlocked ? `うちあなたの回答 ${myAnswerCount}件` : "あなたはまだ回答していません"}
+          {myAnswerCount > 0 ? `うちあなたの回答 ${myAnswerCount}件` : "あなたはまだ回答していません"}
         </span>
-        {unlocked && <RefreshButton />}
+        <RefreshButton />
       </div>
 
-      <AnswerForm odaiId={odai.id} myAnswerCount={myAnswerCount} unlocked={unlocked} />
+      {!unlocked && <AnswerForm odaiId={odai.id} myAnswerCount={myAnswerCount} />}
 
       {!unlocked ? (
-        <Panel className="border-dashed">
-          <p className="text-sm font-bold">他の人の回答は伏せられています</p>
-          <p className="mt-1 text-sm text-muted">
-            回答を1つ出すと、その場で
-            {answerCount > 0 ? `${answerCount}件すべて` : "全部"}
-            見えて採点できます。
-            先に他人の回答を読むと、どうしてもそれに引きずられた回答になるので、
-            順番だけ固定させてください。
-          </p>
-        </Panel>
+        <UnlockPanel odaiId={odai.id} myAnswerCount={myAnswerCount} answerCount={answerCount} />
       ) : (
         <PickForm
           odaiId={odai.id}
@@ -83,7 +76,7 @@ export function OpenPhase({
   );
 }
 
-/** 他の人が出した新しい回答を取りに行く。採点の選択状態は消えない。 */
+/** 回答数など、見えている範囲の最新値を取りに行く。選択中の状態は消えない。 */
 function RefreshButton() {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -100,15 +93,7 @@ function RefreshButton() {
   );
 }
 
-function AnswerForm({
-  odaiId,
-  myAnswerCount,
-  unlocked,
-}: {
-  odaiId: number;
-  myAnswerCount: number;
-  unlocked: boolean;
-}) {
+function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: number }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(submitAnswer, {});
   const left = MAX_ANSWERS_PER_ODAI - myAnswerCount;
 
@@ -116,7 +101,8 @@ function AnswerForm({
     return (
       <Panel>
         <p className="text-sm text-muted">
-          このお題への回答は上限（{MAX_ANSWERS_PER_ODAI}個）に達しました。採点は続けられます。
+          このお題への回答は上限（{MAX_ANSWERS_PER_ODAI}個）に達しました。書き終えたら下の
+          「回答を出し切った」で解禁してください。
         </p>
       </Panel>
     );
@@ -131,7 +117,7 @@ function AnswerForm({
           required
           rows={3}
           maxLength={500}
-          placeholder={unlocked ? "もう1つ書く" : "回答を書く"}
+          placeholder={myAnswerCount === 0 ? "回答を書く" : "もう1つ書く"}
           className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
         />
         <button
@@ -139,12 +125,58 @@ function AnswerForm({
           disabled={pending}
           className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
         >
-          {pending ? "送信中…" : unlocked ? "回答する" : "回答して、他の人の回答を見る"}
+          {pending ? "送信中…" : "回答する"}
         </button>
         <p className="text-xs text-muted">
-          何個でも出せます（このお題にあと{left}個）。回答はすぐ他の人に出ますが、
-          誰が書いたかは結果発表まで伏せられます。あとから消したり直したりはできません。
+          何個でも書けます（このお題にあと{left}個）。あとから消したり直したりはできません。
         </p>
+        <ErrorText message={state.error} />
+      </form>
+    </Panel>
+  );
+}
+
+/** 「もう出し切った」の宣言。解禁は片道切符 —— 押すとそのお題には回答を追加できなくなる。 */
+function UnlockPanel({
+  odaiId,
+  myAnswerCount,
+  answerCount,
+}: {
+  odaiId: number;
+  myAnswerCount: number;
+  answerCount: number;
+}) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(unlockAnswers, {});
+  const canUnlock = myAnswerCount > 0;
+
+  return (
+    <Panel className="space-y-3 border-dashed">
+      <p className="text-sm font-bold">他の人の回答は伏せられています</p>
+      <p className="text-sm text-muted">
+        書きたい回答をすべて書き終えたら、下のボタンでその場にある
+        {answerCount > 0 ? `${answerCount}件` : "回答"}
+        を解禁して採点できます。先に他人の回答を見るとそれに引きずられた回答になるので、
+        <strong className="text-white">解禁すると、このお題にはもう回答を追加できません</strong>
+        （片道切符）。
+      </p>
+      <form
+        action={action}
+        onSubmit={(e) => {
+          if (!window.confirm("これ以降、このお題には回答を追加できなくなります。よろしいですか？")) {
+            e.preventDefault();
+          }
+        }}
+        className="space-y-2"
+      >
+        <input type="hidden" name="odai_id" value={odaiId} />
+        <button
+          type="submit"
+          disabled={pending || !canUnlock}
+          className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
+        >
+          {pending ? "処理中…" : "回答を出し切った → 他の人の回答を見る"}
+        </button>
+        {!canUnlock && <p className="text-xs text-muted">先に1つ回答してください。</p>}
         <ErrorText message={state.error} />
       </form>
     </Panel>

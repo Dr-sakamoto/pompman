@@ -16,14 +16,16 @@ export default async function HomePage() {
     { data: odaiRows },
     { data: myAnswers },
     { data: countRows },
+    { data: unlockRows },
     { data: myPicks },
     { data: progressRows },
   ] = await Promise.all([
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
-    // 自分の回答はいつでも読める（他人の回答は自分が回答するまで読めない）。
+    // 自分の回答はいつでも読める（他人の回答は自分が解禁するまで読めない）。
     supabase.from("answers_view").select("odai_id").eq("is_mine", true),
     // 回答数は件数だけなので、まだ回答していないお題の分も出る。
     supabase.rpc("odai_answer_counts"),
+    supabase.from("answer_unlocks").select("odai_id").eq("user_id", user.id),
     supabase.from("picks").select("odai_id").eq("voter_id", user.id),
     supabase.rpc("ai_progress_stats"),
   ]);
@@ -39,6 +41,7 @@ export default async function HomePage() {
       Number(r.answer_count),
     ]),
   );
+  const unlocked = new Set((unlockRows ?? []).map((r) => r.odai_id as number));
   const scored = new Set((myPicks ?? []).map((p) => p.odai_id as number));
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
@@ -79,15 +82,20 @@ export default async function HomePage() {
               {rows.map((o) => {
                 const count = answerCount.get(o.id) ?? 0;
                 const mine = myAnswerCount.get(o.id) ?? 0;
+                const isUnlocked = unlocked.has(o.id);
                 const todo =
                   o.phase !== "open"
                     ? null
                     : mine === 0
                       ? "未回答"
-                      : // 他人の回答が1つも無いうちは採点できないので急かさない
-                        count > mine && !scored.has(o.id)
-                        ? "未採点"
-                        : null;
+                      : !isUnlocked
+                        ? // 他人の回答が1つも無いうちは解禁を急かさない
+                          count > mine
+                          ? "解禁できます"
+                          : null
+                        : !scored.has(o.id)
+                          ? "未採点"
+                          : null;
 
                 return (
                   <li key={o.id}>
