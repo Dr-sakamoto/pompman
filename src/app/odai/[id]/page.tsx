@@ -4,8 +4,7 @@ import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { AnswerView, AppUser, Odai, Pick } from "@/lib/types";
 import { PhaseBadge } from "@/components/ui";
-import { AnsweringPhase } from "./AnsweringPhase";
-import { VotingPhase } from "./VotingPhase";
+import { OpenPhase } from "./OpenPhase";
 import { ClosedPhase } from "./ClosedPhase";
 
 export default async function OdaiPage({ params }: { params: Promise<{ id: string }> }) {
@@ -25,13 +24,13 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const odai = odaiRow as Odai;
 
   const [{ data: answerRows }, { data: pickRows }, { data: userRows }] = await Promise.all([
-    // 回答受付中は RLS により自分の回答しか返ってこない。
+    // 結果発表前は author_id が伏せられた状態で返ってくる（answers_view）。
     supabase
       .from("answers_view")
       .select("*")
       .eq("odai_id", odaiId)
       .order("created_at", { ascending: true }),
-    // 結果公開前は自分の picks しか返ってこない。
+    // 結果発表前は自分の picks しか返ってこない。
     supabase.from("picks").select("*").eq("odai_id", odaiId),
     supabase.from("users").select("*"),
   ]);
@@ -53,12 +52,8 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         <p className="text-sm text-muted">出題: {handles.get(odai.author_id) ?? "?"}</p>
       </div>
 
-      {odai.phase === "answering" && (
-        <AnsweringPhase odai={odai} myAnswer={answers.find((a) => a.is_mine) ?? null} isOwner={isOwner} />
-      )}
-
-      {odai.phase === "voting" && (
-        <VotingPhase
+      {odai.phase === "open" && (
+        <OpenPhase
           odai={odai}
           answers={answers}
           myPicks={picks.filter((p) => p.voter_id === user.id)}

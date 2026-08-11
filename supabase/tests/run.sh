@@ -29,7 +29,12 @@ echo "== PostgreSQL を $PGDATA に起動 =="
 PSQL="psql -v ON_ERROR_STOP=1 -q"
 $PSQL -d postgres -c "create database odai"
 $PSQL -d odai -f "$HERE/supabase_stub.sql"
-$PSQL -d odai -f "$HERE/../migrations/0001_init.sql"
+# 本番と同じ順で全部流す。0001 だけでは今のスキーマにならない
+# （0002 で関数が private に移り、0007 でフェーズが open/closed に畳まれる）。
+for f in "$HERE"/../migrations/*.sql; do
+  echo "  -- $(basename "$f")"
+  $PSQL -d odai -f "$f"
+done
 echo "== マイグレーション適用OK =="
 echo
 

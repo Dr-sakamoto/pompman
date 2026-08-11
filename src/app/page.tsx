@@ -6,24 +6,30 @@ import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 
-const SECTIONS: Phase[] = ["answering", "voting", "closed"];
+const SECTIONS: Phase[] = ["open", "closed"];
 
 export default async function HomePage() {
   const { user } = await requireMember();
   const supabase = await createClient();
 
-  const [{ data: odaiRows }, { data: myAnswers }, { data: myPicks }, { data: progressRows }] =
+  const [{ data: odaiRows }, { data: answerRows }, { data: myPicks }, { data: progressRows }] =
     await Promise.all([
       supabase.from("odai").select("*").order("created_at", { ascending: false }),
-      // 自分の回答は phase を問わず読める（他人の回答は回答受付中は読めない）
-      supabase.from("answers_view").select("odai_id").eq("is_mine", true),
+      // 回答は投稿された時点で全員に見えるので、件数もここから数えられる。
+      // 誰が書いたかは伏せられたまま（is_mine だけが自分の回答を教えてくれる）。
+      supabase.from("answers_view").select("odai_id,is_mine"),
       supabase.from("picks").select("odai_id").eq("voter_id", user.id),
       supabase.rpc("ai_progress_stats"),
     ]);
 
   const odai = (odaiRows ?? []) as Odai[];
-  const answered = new Set((myAnswers ?? []).map((a) => a.odai_id as number));
-  const voted = new Set((myPicks ?? []).map((p) => p.odai_id as number));
+  const answerCount = new Map<number, number>();
+  const answered = new Set<number>();
+  for (const a of (answerRows ?? []) as { odai_id: number; is_mine: boolean }[]) {
+    answerCount.set(a.odai_id, (answerCount.get(a.odai_id) ?? 0) + 1);
+    if (a.is_mine) answered.add(a.odai_id);
+  }
+  const scored = new Set((myPicks ?? []).map((p) => p.odai_id as number));
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
   return (
@@ -61,10 +67,15 @@ export default async function HomePage() {
             <h2 className="text-sm font-bold text-muted">{PHASE_LABEL[phase]}</h2>
             <ul className="space-y-2">
               {rows.map((o) => {
+                const count = answerCount.get(o.id) ?? 0;
                 const todo =
-                  (o.phase === "answering" && !answered.has(o.id) && "未回答") ||
-                  (o.phase === "voting" && !voted.has(o.id) && "未投票") ||
-                  null;
+                  o.phase !== "open"
+                    ? null
+                    : !answered.has(o.id)
+                      ? "未回答"
+                      : count > 0 && !scored.has(o.id)
+                        ? "未採点"
+                        : null;
 
                 return (
                   <li key={o.id}>
@@ -77,6 +88,7 @@ export default async function HomePage() {
                       <div className="mb-2 flex items-center gap-2">
                         <PhaseBadge phase={o.phase} />
                         {todo && <TodoBadge>{todo}</TodoBadge>}
+                        <span className="ml-auto text-xs text-muted">回答 {count}件</span>
                       </div>
                       <p className="font-medium">{o.text}</p>
                     </Link>

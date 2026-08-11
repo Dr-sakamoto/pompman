@@ -2,8 +2,7 @@ import type { Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 
 const PHASE_STYLE: Record<Phase, string> = {
-  answering: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  voting: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+  open: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
   closed: "bg-white/5 text-muted border-line",
 };
 

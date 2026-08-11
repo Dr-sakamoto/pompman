@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 import { requireAdmin, requireMember } from "@/lib/session";
+import { MAX_PICKS } from "@/lib/types";
 
 export type ActionState = { error?: string };
 
@@ -129,7 +130,6 @@ export async function submitAnswer(_prev: ActionState, formData: FormData): Prom
     .insert({ odai_id: odaiId, author_id: user.id, text });
 
   if (error) {
-    if (error.code === "23505") return { error: "このお題にはすでに回答済みです" };
     if (error.code === "42501") return { error: "このお題はもう回答を受け付けていません" };
     return { error: error.message };
   }
@@ -143,9 +143,9 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
   const odaiId = Number(formData.get("odai_id"));
   if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
 
-  // rank_1, rank_2, rank_3 の順に詰める。空欄は後ろにしか来ない前提。
+  // rank_1 … rank_MAX_PICKS の順に詰める。空欄は後ろにしか来ない前提。
   const ids: number[] = [];
-  for (const rank of [1, 2, 3]) {
+  for (let rank = 1; rank <= MAX_PICKS; rank++) {
     const raw = formData.get(`rank_${rank}`);
     if (raw === null || raw === "") continue;
     const id = Number(raw);
@@ -172,27 +172,14 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
   return {};
 }
 
-export async function closeAnswers(_prev: ActionState, formData: FormData): Promise<ActionState> {
+/** 回答・採点を締め切って結果を発表する。出題者だけが呼べる（判定は DB 側）。 */
+export async function closeOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));
   if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
 
   await requireMember();
   const supabase = await createClient();
-  const { error } = await supabase.rpc("close_answers", { p_odai_id: odaiId });
-  if (error) return { error: error.message };
-
-  revalidatePath(`/odai/${odaiId}`);
-  revalidatePath("/");
-  return {};
-}
-
-export async function closeVoting(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const odaiId = Number(formData.get("odai_id"));
-  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
-
-  await requireMember();
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("close_voting", { p_odai_id: odaiId });
+  const { error } = await supabase.rpc("close_odai", { p_odai_id: odaiId });
   if (error) return { error: error.message };
 
   revalidatePath(`/odai/${odaiId}`);

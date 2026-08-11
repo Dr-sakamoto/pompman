@@ -1,4 +1,10 @@
-export type Phase = "answering" | "voting" | "closed";
+export type Phase = "open" | "closed";
+
+/** 1お題・1人あたりの回答数の上限（DB 側のトリガーと必ず揃えること）。 */
+export const MAX_ANSWERS_PER_ODAI = 10;
+
+/** 1人が選べる回答の数（ベスト3）。 */
+export const MAX_PICKS = 3;
 
 export type AppUser = {
   id: string;
@@ -14,8 +20,7 @@ export type Odai = {
   text: string;
   phase: Phase;
   created_at: string;
-  answers_closed_at: string | null;
-  voting_closed_at: string | null;
+  closed_at: string | null;
 };
 
 /**
@@ -43,7 +48,6 @@ export type Pick = {
 };
 
 export const PHASE_LABEL: Record<Phase, string> = {
-  answering: "回答受付中",
-  voting: "投票中",
-  closed: "結果公開",
+  open: "回答・採点中",
+  closed: "結果発表",
 };
