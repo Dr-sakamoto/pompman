@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { closeAnswers, submitAnswer, type ActionState } from "@/app/actions";
+import { AnswerProgress } from "@/components/AnswerProgress";
 import { ErrorText, Panel } from "@/components/ui";
 import type { AnswerView, Odai } from "@/lib/types";
 
@@ -9,15 +10,25 @@ export function AnsweringPhase({
   odai,
   myAnswer,
   isOwner,
+  progress,
 }: {
   odai: Odai;
   myAnswer: AnswerView | null;
   isOwner: boolean;
+  progress: { answerCount: number; memberCount: number } | null;
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(submitAnswer, {});
 
   return (
     <div className="space-y-4">
+      {progress && (
+        <AnswerProgress
+          answerCount={progress.answerCount}
+          memberCount={progress.memberCount}
+          createdAt={odai.created_at}
+        />
+      )}
+
       {myAnswer ? (
         <Panel>
           <p className="mb-1 text-xs font-bold text-muted">あなたの回答</p>
@@ -48,7 +59,7 @@ export function AnsweringPhase({
       )}
 
       <p className="text-sm text-muted">
-        回答受付中は、他の人の回答も回答者の数も見えません。
+        回答受付中は、他の人の回答の中身は見えません（進み具合はバーで確認できます）。
         {myAnswer && " 回答は1人1つで、あとから変更できません。"}
       </p>
 
