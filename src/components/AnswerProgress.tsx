@@ -3,7 +3,7 @@ import { ANSWER_DEADLINE_DAYS } from "@/lib/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function AnswerProgress({
+function answerProgressRatios({
   answerCount,
   memberCount,
   createdAt,
@@ -19,12 +19,57 @@ export function AnswerProgress({
   const timeRatio = Math.min(1, elapsedMs / deadlineMs);
   const elapsedDays = Math.min(ANSWER_DEADLINE_DAYS, Math.floor(elapsedMs / DAY_MS));
 
+  return { dataRatio, timeRatio, elapsedDays };
+}
+
+export function AnswerProgress({
+  answerCount,
+  memberCount,
+  createdAt,
+}: {
+  answerCount: number;
+  memberCount: number;
+  createdAt: string;
+}) {
+  const { dataRatio, timeRatio, elapsedDays } = answerProgressRatios({
+    answerCount,
+    memberCount,
+    createdAt,
+  });
+
   return (
     <Panel className="space-y-3">
       <p className="text-xs font-bold text-muted">採点フェーズまでの進み具合（どちらか先に埋まったら移行）</p>
       <ProgressBar label="回答数" current={`${answerCount}/${memberCount}人`} ratio={dataRatio} />
       <ProgressBar label="経過日数" current={`${elapsedDays}/${ANSWER_DEADLINE_DAYS}日`} ratio={timeRatio} />
     </Panel>
+  );
+}
+
+export function AnswerProgressMini({
+  answerCount,
+  memberCount,
+  createdAt,
+}: {
+  answerCount: number;
+  memberCount: number;
+  createdAt: string;
+}) {
+  const { dataRatio, timeRatio } = answerProgressRatios({ answerCount, memberCount, createdAt });
+  const percent = Math.round(Math.max(dataRatio, timeRatio) * 100);
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-accent transition-[width]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <span className="text-xs text-muted">
+        {answerCount}/{memberCount}人
+      </span>
+    </div>
   );
 }
 

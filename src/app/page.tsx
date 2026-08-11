@@ -5,6 +5,7 @@ import type { Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
+import { AnswerProgressMini } from "@/components/AnswerProgress";
 
 const SECTIONS: Phase[] = ["answering", "voting", "closed"];
 
@@ -28,6 +29,24 @@ export default async function HomePage() {
   const answered = new Set((myAnswers ?? []).map((a) => a.odai_id as number));
   const voted = new Set((myPicks ?? []).map((p) => p.odai_id as number));
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
+
+  // 回答受付中のお題ごとに、一覧でも進み具合を見せる。
+  const answeringOdai = odai.filter((o) => o.phase === "answering");
+  const answerProgressResults = await Promise.all(
+    answeringOdai.map((o) => supabase.rpc("answering_progress", { p_odai_id: o.id }))
+  );
+  const answerProgressByOdaiId = new Map<number, { answerCount: number; memberCount: number }>();
+  answeringOdai.forEach((o, i) => {
+    const row = answerProgressResults[i].data?.[0] as
+      | { answer_count: number; member_count: number }
+      | undefined;
+    if (row) {
+      answerProgressByOdaiId.set(o.id, {
+        answerCount: row.answer_count,
+        memberCount: row.member_count,
+      });
+    }
+  });
 
   return (
     <div className="space-y-8">
@@ -82,6 +101,15 @@ export default async function HomePage() {
                         {todo && <TodoBadge>{todo}</TodoBadge>}
                       </div>
                       <p className="font-medium">{o.text}</p>
+                      {o.phase === "answering" && answerProgressByOdaiId.has(o.id) && (
+                        <div className="mt-2">
+                          <AnswerProgressMini
+                            answerCount={answerProgressByOdaiId.get(o.id)!.answerCount}
+                            memberCount={answerProgressByOdaiId.get(o.id)!.memberCount}
+                            createdAt={o.created_at}
+                          />
+                        </div>
+                      )}
                     </Link>
                   </li>
                 );
