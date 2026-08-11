@@ -12,18 +12,23 @@ const RANK_LABEL = ["1位", "2位", "3位"];
 /**
  * 回答と採点が同居するフェーズ。
  *
- * 回答は投稿した瞬間から全員に見える。誰が書いたかは結果発表まで伏せたままなので、
- * 「名前で選ばれる」ことは起きない。採点（picks）も結果発表まで他人には見えない。
+ * ただし他人の回答は「自分が回答するまで」見えない（DB 側で担保）。
+ * 他人の回答を見てから書くと引きずられた回答が混ざり、教師データとして劣化するため。
+ * 回答を1つ出せばその場で全部見えて、そのまま採点できる。
+ *
+ * 誰が書いたかは結果発表まで伏せたまま。採点（picks）も結果発表まで他人には見えない。
  */
 export function OpenPhase({
   odai,
   answers,
+  answerCount,
   myPicks,
   voterId,
   isOwner,
 }: {
   odai: Odai;
   answers: AnswerView[];
+  answerCount: number;
   myPicks: Pick[];
   voterId: string;
   isOwner: boolean;
@@ -35,25 +40,34 @@ export function OpenPhase({
   );
 
   const myAnswerCount = answers.filter((a) => a.is_mine).length;
+  // 回答していないうちは answers に他人の行が入ってこない（＝ロック中）。
+  const unlocked = myAnswerCount > 0;
   const pickable = answers.length - myAnswerCount;
   const maxPicks = Math.min(MAX_PICKS, pickable);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span className="font-bold">回答 {answers.length}件</span>
+        <span className="font-bold">回答 {answerCount}件</span>
         <span className="text-muted">
-          {myAnswerCount > 0 ? `うちあなたの回答 ${myAnswerCount}件` : "あなたはまだ回答していません"}
+          {unlocked ? `うちあなたの回答 ${myAnswerCount}件` : "あなたはまだ回答していません"}
         </span>
-        <RefreshButton />
+        {unlocked && <RefreshButton />}
       </div>
 
-      <AnswerForm odaiId={odai.id} myAnswerCount={myAnswerCount} />
+      <AnswerForm odaiId={odai.id} myAnswerCount={myAnswerCount} unlocked={unlocked} />
 
-      {answers.length === 0 ? (
-        <p className="text-sm text-muted">
-          まだ回答がありません。最初の1つを書いてください。
-        </p>
+      {!unlocked ? (
+        <Panel className="border-dashed">
+          <p className="text-sm font-bold">他の人の回答は伏せられています</p>
+          <p className="mt-1 text-sm text-muted">
+            回答を1つ出すと、その場で
+            {answerCount > 0 ? `${answerCount}件すべて` : "全部"}
+            見えて採点できます。
+            先に他人の回答を読むと、どうしてもそれに引きずられた回答になるので、
+            順番だけ固定させてください。
+          </p>
+        </Panel>
       ) : (
         <PickForm
           odaiId={odai.id}
@@ -86,7 +100,15 @@ function RefreshButton() {
   );
 }
 
-function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: number }) {
+function AnswerForm({
+  odaiId,
+  myAnswerCount,
+  unlocked,
+}: {
+  odaiId: number;
+  myAnswerCount: number;
+  unlocked: boolean;
+}) {
   const [state, action, pending] = useActionState<ActionState, FormData>(submitAnswer, {});
   const left = MAX_ANSWERS_PER_ODAI - myAnswerCount;
 
@@ -109,7 +131,7 @@ function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: 
           required
           rows={3}
           maxLength={500}
-          placeholder={myAnswerCount === 0 ? "回答を書く" : "もう1つ書く"}
+          placeholder={unlocked ? "もう1つ書く" : "回答を書く"}
           className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
         />
         <button
@@ -117,10 +139,10 @@ function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: 
           disabled={pending}
           className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
         >
-          {pending ? "送信中…" : "回答する"}
+          {pending ? "送信中…" : unlocked ? "回答する" : "回答して、他の人の回答を見る"}
         </button>
         <p className="text-xs text-muted">
-          何個でも出せます（このお題にあと{left}個）。回答はすぐ全員に出ますが、
+          何個でも出せます（このお題にあと{left}個）。回答はすぐ他の人に出ますが、
           誰が書いたかは結果発表まで伏せられます。あとから消したり直したりはできません。
         </p>
         <ErrorText message={state.error} />

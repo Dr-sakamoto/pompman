@@ -70,13 +70,22 @@ A1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$ALICE' ord
 B1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$BOB' order by id limit 1;")
 B2=$($PSQL -c "select id from answers where odai_id=1 and author_id='$BOB' order by id offset 1 limit 1;")
 
-eq   "回答は投稿された時点で全員に見える"          "3" $CAROL "select count(*) from answers_view where odai_id=1;"
-eq   "誰が書いたかは伏せられている"                "0" $CAROL "select count(*) from answers_view where odai_id=1 and author_id is not null;"
+echo
+echo "-- 回答するまで他人の回答は見えない --"
+eq   "未回答の carol には1件も見えない"            "0" $CAROL "select count(*) from answers_view where odai_id=1;"
+eq   "未回答でも回答数だけは分かる"                "3" $CAROL "select answer_count from odai_answer_counts() where odai_id=1;"
+deny "未回答では採点できない"                $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
+deny "未回答では picks を直接入れられない"   $CAROL "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$CAROL',$A1,1);"
+eq   "回答した bob には全部見えている"             "3" $BOB   "select count(*) from answers_view where odai_id=1;"
+eq   "誰が書いたかは伏せられている"                "0" $BOB   "select count(*) from answers_view where odai_id=1 and author_id is not null and not is_mine;"
 eq   "自分の回答だけは自分と分かる"                "2" $BOB   "select count(*) from answers_view where odai_id=1 and is_mine;"
 
 echo
-echo "-- 採点は回答受付と同時に進む --"
-ok   "carol は回答していなくても採点できる"  $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
+echo "-- 回答した瞬間に解禁され、そのまま採点できる --"
+ok   "carol が回答する"                      $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','キャロルの回答');"
+C1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$CAROL' order by id limit 1;")
+eq   "回答した瞬間に全部見える"                    "4" $CAROL "select count(*) from answers_view where odai_id=1;"
+ok   "そのまま採点できる"                    $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
 eq   "3つ未満でも採点は成立する"                   "2" $CAROL "select count(*) from picks where voter_id='$CAROL';"
 deny "自分の回答は選べない"                  $ALICE "select submit_picks(1, array[$A1]::bigint[]);"
 deny "自分の回答は直接 insert でも選べない"  $ALICE "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$ALICE',$A1,1);"
@@ -89,12 +98,12 @@ eq   "採点中は他人の picks が読めない"             "0" $BOB   "selec
 
 echo
 echo "-- 採点が始まっていても回答は増やせる --"
-ok   "carol が採点のあとに回答を足す"        $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','あとから来た回答');"
-C1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$CAROL' order by id limit 1;")
-eq   "回答は4件になった"                           "4" $BOB   "select count(*) from answers_view where odai_id=1;"
+ok   "carol が採点のあとに2つめの回答を足す" $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','あとから来た回答');"
+C2=$($PSQL -c "select id from answers where odai_id=1 and author_id='$CAROL' order by id offset 1 limit 1;")
+eq   "回答は5件になった"                           "5" $BOB   "select count(*) from answers_view where odai_id=1;"
 eq   "carol の採点はそのまま残っている"            "2" $CAROL "select count(*) from picks where voter_id='$CAROL';"
 ok   "carol は増えた回答を含めて選び直せる"  $CAROL "select submit_picks(1, array[$B1,$B2,$A1]::bigint[]);"
-deny "選べる数より多くは選べない"            $BOB   "select submit_picks(1, array[$A1,$C1,$B1]::bigint[]);"
+deny "選べる数より多くは選べない"            $BOB   "select submit_picks(1, array[$A1,$C1,$C2,$B1]::bigint[]);"
 ok   "bob は増えた回答も選べる"              $BOB   "select submit_picks(1, array[$C1,$A1]::bigint[]);"
 
 echo
@@ -107,7 +116,7 @@ eq   "closed_at が入る"                            "t" $CAROL "select closed_
 
 deny "closed 後は回答できない"               $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','遅刻回答');"
 deny "closed 後は採点できない"               $CAROL "select submit_picks(1, array[$A1]::bigint[]);"
-eq   "結果発表後は回答者名が開示される"            "4" $CAROL "select count(*) from answers_view where odai_id=1 and author_id is not null;"
+eq   "結果発表後は回答者名が開示される"            "5" $CAROL "select count(*) from answers_view where odai_id=1 and author_id is not null;"
 eq   "結果発表後は他人の picks も読める"           "6" $BOB   "select count(*) from picks where odai_id=1;"
 ok   "closed 後の DELETE は0件に絞られる"    $ALICE "delete from picks where voter_id='$ALICE';"
 eq   "alice の picks は消えていない"               "1" $ALICE "select count(*) from picks where voter_id='$ALICE';"
@@ -122,6 +131,9 @@ insert into auth.users(id,email) values ('$DAVE','d@x.test'), ('$ERIN','e@x.test
 insert into public.users(id,handle,terms_accepted_at) values
   ('$DAVE','dave',now()), ('$ERIN','erin',now());
 SQL
+eq   "結果発表後は、回答していない人にも全部見える" "5" $DAVE \
+     "select count(*) from answers_view where odai_id=1;"
+
 ok   "dave がお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','限界に挑むお題');"
 O2=$($PSQL -c "select max(id) from odai;")
 
@@ -187,6 +199,8 @@ echo "(B) 誰からも選ばれなかった回答（件数）:"
 $PSQL -c "select count(*) from answers a left join picks p on p.answer_id = a.id where p.id is null;"
 echo "(C) 特定メンバーの picks:"
 $PSQL -c "select odai_id, answer_id, rank from picks where voter_id = '$ALICE' order by odai_id, rank;"
+echo "(D) 他人の回答を見る前に書かれた回答（各人・各お題の1つ目）の件数:"
+$PSQL -c "select count(*) from (select distinct on (odai_id, author_id) id from answers order by odai_id, author_id, created_at) t;"
 
 echo
 echo "================ pass=$pass fail=$fail ================"

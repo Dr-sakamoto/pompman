@@ -12,23 +12,33 @@ export default async function HomePage() {
   const { user } = await requireMember();
   const supabase = await createClient();
 
-  const [{ data: odaiRows }, { data: answerRows }, { data: myPicks }, { data: progressRows }] =
-    await Promise.all([
-      supabase.from("odai").select("*").order("created_at", { ascending: false }),
-      // 回答は投稿された時点で全員に見えるので、件数もここから数えられる。
-      // 誰が書いたかは伏せられたまま（is_mine だけが自分の回答を教えてくれる）。
-      supabase.from("answers_view").select("odai_id,is_mine"),
-      supabase.from("picks").select("odai_id").eq("voter_id", user.id),
-      supabase.rpc("ai_progress_stats"),
-    ]);
+  const [
+    { data: odaiRows },
+    { data: myAnswers },
+    { data: countRows },
+    { data: myPicks },
+    { data: progressRows },
+  ] = await Promise.all([
+    supabase.from("odai").select("*").order("created_at", { ascending: false }),
+    // 自分の回答はいつでも読める（他人の回答は自分が回答するまで読めない）。
+    supabase.from("answers_view").select("odai_id").eq("is_mine", true),
+    // 回答数は件数だけなので、まだ回答していないお題の分も出る。
+    supabase.rpc("odai_answer_counts"),
+    supabase.from("picks").select("odai_id").eq("voter_id", user.id),
+    supabase.rpc("ai_progress_stats"),
+  ]);
 
   const odai = (odaiRows ?? []) as Odai[];
-  const answerCount = new Map<number, number>();
-  const answered = new Set<number>();
-  for (const a of (answerRows ?? []) as { odai_id: number; is_mine: boolean }[]) {
-    answerCount.set(a.odai_id, (answerCount.get(a.odai_id) ?? 0) + 1);
-    if (a.is_mine) answered.add(a.odai_id);
+  const myAnswerCount = new Map<number, number>();
+  for (const a of (myAnswers ?? []) as { odai_id: number }[]) {
+    myAnswerCount.set(a.odai_id, (myAnswerCount.get(a.odai_id) ?? 0) + 1);
   }
+  const answerCount = new Map(
+    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).map((r) => [
+      r.odai_id,
+      Number(r.answer_count),
+    ]),
+  );
   const scored = new Set((myPicks ?? []).map((p) => p.odai_id as number));
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
@@ -68,12 +78,14 @@ export default async function HomePage() {
             <ul className="space-y-2">
               {rows.map((o) => {
                 const count = answerCount.get(o.id) ?? 0;
+                const mine = myAnswerCount.get(o.id) ?? 0;
                 const todo =
                   o.phase !== "open"
                     ? null
-                    : !answered.has(o.id)
+                    : mine === 0
                       ? "未回答"
-                      : count > 0 && !scored.has(o.id)
+                      : // 他人の回答が1つも無いうちは採点できないので急かさない
+                        count > mine && !scored.has(o.id)
                         ? "未採点"
                         : null;
 

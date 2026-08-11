@@ -23,21 +23,29 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   if (!odaiRow) notFound();
   const odai = odaiRow as Odai;
 
-  const [{ data: answerRows }, { data: pickRows }, { data: userRows }] = await Promise.all([
-    // 結果発表前は author_id が伏せられた状態で返ってくる（answers_view）。
-    supabase
-      .from("answers_view")
-      .select("*")
-      .eq("odai_id", odaiId)
-      .order("created_at", { ascending: true }),
-    // 結果発表前は自分の picks しか返ってこない。
-    supabase.from("picks").select("*").eq("odai_id", odaiId),
-    supabase.from("users").select("*"),
-  ]);
+  const [{ data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }] =
+    await Promise.all([
+      // 自分が回答するまで、他人の回答は1行も返ってこない（answers_view）。
+      // 結果発表前は author_id も伏せられている。
+      supabase
+        .from("answers_view")
+        .select("*")
+        .eq("odai_id", odaiId)
+        .order("created_at", { ascending: true }),
+      // 結果発表前は自分の picks しか返ってこない。
+      supabase.from("picks").select("*").eq("odai_id", odaiId),
+      supabase.from("users").select("*"),
+      // 件数は中身を含まないので、解禁前でも見せる。
+      supabase.rpc("odai_answer_counts"),
+    ]);
 
   const answers = (answerRows ?? []) as AnswerView[];
   const picks = (pickRows ?? []) as Pick[];
   const handles = new Map(((userRows ?? []) as AppUser[]).map((u) => [u.id, u.handle]));
+  const answerCount =
+    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).find(
+      (r) => r.odai_id === odaiId,
+    )?.answer_count ?? 0;
   const isOwner = odai.author_id === user.id;
 
   return (
@@ -56,6 +64,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         <OpenPhase
           odai={odai}
           answers={answers}
+          answerCount={answerCount}
           myPicks={picks.filter((p) => p.voter_id === user.id)}
           voterId={user.id}
           isOwner={isOwner}
