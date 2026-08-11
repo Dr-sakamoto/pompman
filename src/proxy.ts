@@ -50,5 +50,16 @@ export default async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  /*
+   * 認証チェックが要るのはページと Server Action だけ。静的ファイルまで通すと、
+   * 未ログイン時に /login の HTML が返ってしまう。
+   *
+   * 特に /sw.js がこれに当たっていた。Content-Type が text/html になるため
+   * navigator.serviceWorker.register() が MIME type エラーで失敗し、
+   * 「ログイン画面に戻される状態」に陥ると Service Worker の更新チェックまで
+   * 失敗して、壊れた古い Service Worker が更新されないまま残り続けていた。
+   */
+  matcher: [
+    "/((?!_next/|sw\\.js|manifest\\.webmanifest|favicon\\.ico|.*\\.(?:svg|png|jpe?g|gif|webp|ico|js|css|json|txt|woff2?)$).*)",
+  ],
 };
