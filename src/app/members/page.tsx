@@ -23,7 +23,7 @@ export default async function MembersPage() {
       <div>
         <h1 className="text-2xl font-bold">メンバー</h1>
         <p className="mt-1 text-sm text-muted">
-          現在{members.length}人が参加しています。大喜利の回答・投票には影響しません。
+          現在{members.length}人が参加しています。大喜利の回答・採点には影響しません。
         </p>
       </div>
 

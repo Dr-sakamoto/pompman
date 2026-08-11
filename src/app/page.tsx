@@ -6,27 +6,40 @@ import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 
-const SECTIONS: Phase[] = ["answering", "voting", "closed"];
+const SECTIONS: Phase[] = ["open", "closed"];
 
 export default async function HomePage() {
   const { user } = await requireMember();
   const supabase = await createClient();
 
-  // 経過日数による自動締め切りは呼び出しトリガーがないので、表示のたびに掃除する。
-  await supabase.rpc("sweep_answer_deadlines");
-
-  const [{ data: odaiRows }, { data: myAnswers }, { data: myPicks }, { data: progressRows }] =
-    await Promise.all([
-      supabase.from("odai").select("*").order("created_at", { ascending: false }),
-      // 自分の回答は phase を問わず読める（他人の回答は回答受付中は読めない）
-      supabase.from("answers_view").select("odai_id").eq("is_mine", true),
-      supabase.from("picks").select("odai_id").eq("voter_id", user.id),
-      supabase.rpc("ai_progress_stats"),
-    ]);
+  const [
+    { data: odaiRows },
+    { data: myAnswers },
+    { data: countRows },
+    { data: myPicks },
+    { data: progressRows },
+  ] = await Promise.all([
+    supabase.from("odai").select("*").order("created_at", { ascending: false }),
+    // 自分の回答はいつでも読める（他人の回答は自分が回答するまで読めない）。
+    supabase.from("answers_view").select("odai_id").eq("is_mine", true),
+    // 回答数は件数だけなので、まだ回答していないお題の分も出る。
+    supabase.rpc("odai_answer_counts"),
+    supabase.from("picks").select("odai_id").eq("voter_id", user.id),
+    supabase.rpc("ai_progress_stats"),
+  ]);
 
   const odai = (odaiRows ?? []) as Odai[];
-  const answered = new Set((myAnswers ?? []).map((a) => a.odai_id as number));
-  const voted = new Set((myPicks ?? []).map((p) => p.odai_id as number));
+  const myAnswerCount = new Map<number, number>();
+  for (const a of (myAnswers ?? []) as { odai_id: number }[]) {
+    myAnswerCount.set(a.odai_id, (myAnswerCount.get(a.odai_id) ?? 0) + 1);
+  }
+  const answerCount = new Map(
+    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).map((r) => [
+      r.odai_id,
+      Number(r.answer_count),
+    ]),
+  );
+  const scored = new Set((myPicks ?? []).map((p) => p.odai_id as number));
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
   return (
@@ -64,10 +77,17 @@ export default async function HomePage() {
             <h2 className="text-sm font-bold text-muted">{PHASE_LABEL[phase]}</h2>
             <ul className="space-y-2">
               {rows.map((o) => {
+                const count = answerCount.get(o.id) ?? 0;
+                const mine = myAnswerCount.get(o.id) ?? 0;
                 const todo =
-                  (o.phase === "answering" && !answered.has(o.id) && "未回答") ||
-                  (o.phase === "voting" && !voted.has(o.id) && "未投票") ||
-                  null;
+                  o.phase !== "open"
+                    ? null
+                    : mine === 0
+                      ? "未回答"
+                      : // 他人の回答が1つも無いうちは採点できないので急かさない
+                        count > mine && !scored.has(o.id)
+                        ? "未採点"
+                        : null;
 
                 return (
                   <li key={o.id}>
@@ -80,6 +100,7 @@ export default async function HomePage() {
                       <div className="mb-2 flex items-center gap-2">
                         <PhaseBadge phase={o.phase} />
                         {todo && <TodoBadge>{todo}</TodoBadge>}
+                        <span className="ml-auto text-xs text-muted">回答 {count}件</span>
                       </div>
                       <p className="font-medium">{o.text}</p>
                     </Link>
