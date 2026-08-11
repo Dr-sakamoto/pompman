@@ -70,7 +70,9 @@ function CloseAnswersButton({ odaiId }: { odaiId: number }) {
       >
         {pending ? "処理中…" : "回答を締め切って投票へ"}
       </button>
-      <p className="text-xs text-muted">出題者だけが操作できます。回答が2件以上必要です。</p>
+      <p className="text-xs text-muted">
+        出題者だけが操作できます。回答が2件以上必要です。何もしなくても、全員が回答するか3日経つと自動で締め切られます。
+      </p>
       <ErrorText message={state.error} />
     </form>
   );

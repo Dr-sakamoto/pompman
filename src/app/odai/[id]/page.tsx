@@ -16,6 +16,9 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const { user } = await requireMember();
   const supabase = await createClient();
 
+  // 経過日数による自動締め切りは呼び出しトリガーがないので、表示のたびに掃除する。
+  await supabase.rpc("sweep_answer_deadlines");
+
   const { data: odaiRow } = await supabase
     .from("odai")
     .select("*")
