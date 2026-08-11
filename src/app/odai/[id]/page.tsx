@@ -64,7 +64,9 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       <div className="space-y-2">
         <PhaseBadge phase={odai.phase} />
         <h1 className="text-2xl font-bold leading-snug">{odai.text}</h1>
-        <p className="text-sm text-muted">出題: {handles.get(odai.author_id) ?? "?"}</p>
+        <p className="text-sm text-muted">
+          出題: {odai.phase === "closed" ? handles.get(odai.author_id) ?? "?" : "匿名"}
+        </p>
       </div>
 
       {odai.phase === "answering" && (
