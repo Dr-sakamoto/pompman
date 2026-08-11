@@ -42,6 +42,9 @@ export type Pick = {
   created_at: string;
 };
 
+// supabase/migrations/0007_auto_close_answers.sql の interval '3 days' と一致させること。
+export const ANSWER_DEADLINE_DAYS = 3;
+
 export const PHASE_LABEL: Record<Phase, string> = {
   answering: "回答受付中",
   voting: "投票中",

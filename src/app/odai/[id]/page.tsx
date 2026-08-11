@@ -27,22 +27,33 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   if (!odaiRow) notFound();
   const odai = odaiRow as Odai;
 
-  const [{ data: answerRows }, { data: pickRows }, { data: userRows }] = await Promise.all([
-    // 回答受付中は RLS により自分の回答しか返ってこない。
-    supabase
-      .from("answers_view")
-      .select("*")
-      .eq("odai_id", odaiId)
-      .order("created_at", { ascending: true }),
-    // 結果公開前は自分の picks しか返ってこない。
-    supabase.from("picks").select("*").eq("odai_id", odaiId),
-    supabase.from("users").select("*"),
-  ]);
+  const [{ data: answerRows }, { data: pickRows }, { data: userRows }, { data: progressRows }] =
+    await Promise.all([
+      // 回答受付中は RLS により自分の回答しか返ってこない。
+      supabase
+        .from("answers_view")
+        .select("*")
+        .eq("odai_id", odaiId)
+        .order("created_at", { ascending: true }),
+      // 結果公開前は自分の picks しか返ってこない。
+      supabase.from("picks").select("*").eq("odai_id", odaiId),
+      supabase.from("users").select("*"),
+      // 集計値だけの RPC。回答受付中でなければ使わないが、無条件に呼んでも害はない。
+      odai.phase === "answering"
+        ? supabase.rpc("answering_progress", { p_odai_id: odaiId })
+        : Promise.resolve({ data: null }),
+    ]);
 
   const answers = (answerRows ?? []) as AnswerView[];
   const picks = (pickRows ?? []) as Pick[];
   const handles = new Map(((userRows ?? []) as AppUser[]).map((u) => [u.id, u.handle]));
   const isOwner = odai.author_id === user.id;
+  const progressRow = progressRows?.[0] as
+    | { answer_count: number; member_count: number }
+    | undefined;
+  const progress = progressRow
+    ? { answerCount: progressRow.answer_count, memberCount: progressRow.member_count }
+    : null;
 
   return (
     <div className="space-y-6">
@@ -57,7 +68,12 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       </div>
 
       {odai.phase === "answering" && (
-        <AnsweringPhase odai={odai} myAnswer={answers.find((a) => a.is_mine) ?? null} isOwner={isOwner} />
+        <AnsweringPhase
+          odai={odai}
+          myAnswer={answers.find((a) => a.is_mine) ?? null}
+          isOwner={isOwner}
+          progress={progress}
+        />
       )}
 
       {odai.phase === "voting" && (
