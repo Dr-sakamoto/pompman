@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
-import { getUserResilient, hasAuthCookie } from "@/lib/supabase/auth";
+import { getSessionResilient, hasAuthCookie } from "@/lib/supabase/auth";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
@@ -25,12 +25,24 @@ export default async function proxy(request: NextRequest) {
     },
   });
 
-  // getUser() を呼ぶことでセッションが更新され、Cookie が書き戻される。
-  // Cookie が無いなら問い合わせるまでもなく未ログイン。
+  /*
+   * ここは全リクエスト（ページ表示も Server Action の POST も）が通る。
+   * 以前は getUser() を呼んでいたが、これは毎回 Auth サーバーへの往復に
+   * なるため、回答送信・ログイン・お題送信のすべてに固定で1往復ぶんの
+   * 待ち時間を足していた。
+   *
+   * middleware に要るのは (1) 期限が近いセッションを更新して Cookie に
+   * 書き戻すこと、(2) 未ログインなら /login に流すこと、の2つだけ。
+   * getSession() は Cookie から読むだけなので通常は通信せず、(1) が必要な
+   * ときだけ内部でリフレッシュして setAll() が走る。
+   *
+   * 「本人か」の検証をここでしなくてよい理由は getSessionResilient() の
+   * コメントを参照（ページ側の requireMember() と DB の RLS が本番の関所）。
+   */
   const signedIn = hasAuthCookie(request.cookies.getAll());
-  const { user, networkFailure } = signedIn
-    ? await getUserResilient(supabase)
-    : { user: null, networkFailure: false };
+  const { session, networkFailure } = signedIn
+    ? await getSessionResilient(supabase)
+    : { session: null, networkFailure: false };
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -39,7 +51,7 @@ export default async function proxy(request: NextRequest) {
   // ここで飛ばすと、復帰直後の一瞬の通信失敗でログイン画面に戻されてしまう。
   if (networkFailure) return response;
 
-  if (!user && !isPublic) {
+  if (!session && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

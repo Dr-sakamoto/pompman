@@ -1,4 +1,4 @@
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 /**
  * Supabase のセッション Cookie が入っているか。
@@ -45,6 +45,35 @@ export async function getUserResilient(
     if (data.user) return { user: data.user, networkFailure: false };
     if (!isNetworkFailure(error)) return { user: null, networkFailure: false };
     if (attempt >= delays.length) return { user: null, networkFailure: true };
+
+    await sleep(delays[attempt]);
+  }
+}
+
+/**
+ * Cookie に入っているセッションをそのまま読む。
+ *
+ * getUser() と違って Auth サーバーへ問い合わせないので、通常は通信ゼロで返る
+ * （期限が近いときだけ auth-js が裏でトークンを更新し、そのぶんだけ往復する）。
+ *
+ * **署名は検証していないので、これで「本人である」と判断してはいけない。**
+ * 用途は proxy.ts の「/login に飛ばすかどうか」の交通整理だけ。その先の
+ * ページと Server Action は必ず requireMember() を通り、そこで getUser() が
+ * Auth サーバーに問い合わせる。DB 側も RLS が本物の JWT で判定する。
+ * 偽の Cookie を持ち込んでも、リダイレクトを1回すり抜けられるだけで
+ * データには一切触れない。
+ */
+export async function getSessionResilient(
+  supabase: SupabaseClient,
+): Promise<{ session: Session | null; networkFailure: boolean }> {
+  const delays = [150, 400];
+
+  for (let attempt = 0; ; attempt++) {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (data.session) return { session: data.session, networkFailure: false };
+    if (!isNetworkFailure(error)) return { session: null, networkFailure: false };
+    if (attempt >= delays.length) return { session: null, networkFailure: true };
 
     await sleep(delays[attempt]);
   }

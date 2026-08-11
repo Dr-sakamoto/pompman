@@ -45,6 +45,20 @@ export type Pick = {
 // supabase/migrations/0007_auto_close_answers.sql の interval '3 days' と一致させること。
 export const ANSWER_DEADLINE_DAYS = 3;
 
+/**
+ * 経過日数による自動締め切りの条件を満たしているか。
+ *
+ * sweep_answer_deadlines() を呼ぶ必要があるかの事前判定に使う。掃除が要るのは
+ * 「作成から3日経った回答受付中のお題」がある場合だけで、それは手元の
+ * created_at を見れば分かる。ほとんどの表示では該当ゼロなので、RPC の往復を
+ * まるごと省ける（もう一つの条件「全員回答した」は answers の INSERT
+ * トリガーが即座に処理するので、ここで気にしなくてよい）。
+ */
+export function isPastAnswerDeadline(createdAt: string): boolean {
+  const deadlineMs = ANSWER_DEADLINE_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() >= new Date(createdAt).getTime() + deadlineMs;
+}
+
 export const PHASE_LABEL: Record<Phase, string> = {
   answering: "回答受付中",
   voting: "投票中",
