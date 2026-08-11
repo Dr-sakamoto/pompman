@@ -1,4 +1,4 @@
-import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 /**
  * Supabase のセッション Cookie が入っているか。
@@ -36,45 +36,46 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export async function getUserResilient(
   supabase: SupabaseClient,
-): Promise<{ user: User | null; networkFailure: boolean }> {
+): Promise<{ user: User | null; networkFailure: boolean; authError?: string }> {
   const delays = [150, 400];
 
   for (let attempt = 0; ; attempt++) {
     const { data, error } = await supabase.auth.getUser();
 
     if (data.user) return { user: data.user, networkFailure: false };
-    if (!isNetworkFailure(error)) return { user: null, networkFailure: false };
-    if (attempt >= delays.length) return { user: null, networkFailure: true };
+    if (!isNetworkFailure(error)) {
+      return { user: null, networkFailure: false, authError: describeAuthError(error) };
+    }
+    if (attempt >= delays.length) {
+      return { user: null, networkFailure: true, authError: describeAuthError(error) };
+    }
 
     await sleep(delays[attempt]);
   }
 }
 
+/** ログ用。トークンは絶対に含めない。 */
+function describeAuthError(error: unknown): string {
+  if (!error) return "none";
+  const e = error as { name?: string; status?: number; message?: string };
+  return `${e.name ?? "?"}/${e.status ?? "?"}/${e.message ?? "?"}`;
+}
+
 /**
- * Cookie に入っているセッションをそのまま読む。
+ * セッションが復元できなかったときに、原因を切り分けるための情報を作る。
  *
- * getUser() と違って Auth サーバーへ問い合わせないので、通常は通信ゼロで返る
- * （期限が近いときだけ auth-js が裏でトークンを更新し、そのぶんだけ往復する）。
+ * 「Cookie が端末から消えている」のか「Cookie はあるが壊れている（分割された
+ * チャンクの片方だけ失われた等）」のかは、どちらも同じ症状（Supabase に
+ * 問い合わせが飛ばないまま未ログイン扱い）になるため、外形からは区別できない。
  *
- * **署名は検証していないので、これで「本人である」と判断してはいけない。**
- * 用途は proxy.ts の「/login に飛ばすかどうか」の交通整理だけ。その先の
- * ページと Server Action は必ず requireMember() を通り、そこで getUser() が
- * Auth サーバーに問い合わせる。DB 側も RLS が本物の JWT で判定する。
- * 偽の Cookie を持ち込んでも、リダイレクトを1回すり抜けられるだけで
- * データには一切触れない。
+ * 値はセッショントークンそのものなので絶対に出さない。名前と長さだけ記録する。
  */
-export async function getSessionResilient(
-  supabase: SupabaseClient,
-): Promise<{ session: Session | null; networkFailure: boolean }> {
-  const delays = [150, 400];
-
-  for (let attempt = 0; ; attempt++) {
-    const { data, error } = await supabase.auth.getSession();
-
-    if (data.session) return { session: data.session, networkFailure: false };
-    if (!isNetworkFailure(error)) return { session: null, networkFailure: false };
-    if (attempt >= delays.length) return { session: null, networkFailure: true };
-
-    await sleep(delays[attempt]);
+export function describeAuthCookies(cookies: { name: string; value: string }[]): string {
+  const auth = cookies.filter((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+  if (auth.length === 0) {
+    const others = cookies.map((c) => c.name).join(",") || "(none)";
+    return `authCookies=0 otherCookies=[${others}]`;
   }
+  const parts = auth.map((c) => `${c.name}:${c.value.length}B`).join(" ");
+  return `authCookies=${auth.length} ${parts}`;
 }

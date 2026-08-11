@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { SESSION_BACKUP_COOKIE, SESSION_BACKUP_OPTIONS } from "@/lib/supabase/session-backup";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 import { requireAdmin, requireMember } from "@/lib/session";
 import { MAX_PICKS } from "@/lib/types";
@@ -27,7 +29,7 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     return {
       error:
@@ -37,7 +39,18 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
     };
   }
 
+  await saveSessionBackup(data.session?.refresh_token);
   redirect("/");
+}
+
+/**
+ * セッションの控えを保存する。
+ * 本体の Cookie が失われても、これがあれば middleware が作り直せる。
+ */
+async function saveSessionBackup(refreshToken: string | undefined) {
+  if (!refreshToken) return;
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_BACKUP_COOKIE, refreshToken, SESSION_BACKUP_OPTIONS);
 }
 
 /**
@@ -61,9 +74,10 @@ export async function signup(_prev: ActionState, formData: FormData): Promise<Ac
   if (!res.ok) return { error: json.error ?? "登録に失敗しました" };
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: error.message };
 
+  await saveSessionBackup(data.session?.refresh_token);
   redirect("/");
 }
 
