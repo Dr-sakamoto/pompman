@@ -66,7 +66,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-2xl px-4 py-6">{children}</main>
+        <main
+          className="mx-auto max-w-2xl px-4 py-6"
+          style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+        >
+          {children}
+        </main>
       </body>
     </html>
   );
