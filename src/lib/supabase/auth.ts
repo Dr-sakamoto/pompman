@@ -36,16 +36,46 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export async function getUserResilient(
   supabase: SupabaseClient,
-): Promise<{ user: User | null; networkFailure: boolean }> {
+): Promise<{ user: User | null; networkFailure: boolean; authError?: string }> {
   const delays = [150, 400];
 
   for (let attempt = 0; ; attempt++) {
     const { data, error } = await supabase.auth.getUser();
 
     if (data.user) return { user: data.user, networkFailure: false };
-    if (!isNetworkFailure(error)) return { user: null, networkFailure: false };
-    if (attempt >= delays.length) return { user: null, networkFailure: true };
+    if (!isNetworkFailure(error)) {
+      return { user: null, networkFailure: false, authError: describeAuthError(error) };
+    }
+    if (attempt >= delays.length) {
+      return { user: null, networkFailure: true, authError: describeAuthError(error) };
+    }
 
     await sleep(delays[attempt]);
   }
+}
+
+/** ログ用。トークンは絶対に含めない。 */
+function describeAuthError(error: unknown): string {
+  if (!error) return "none";
+  const e = error as { name?: string; status?: number; message?: string };
+  return `${e.name ?? "?"}/${e.status ?? "?"}/${e.message ?? "?"}`;
+}
+
+/**
+ * セッションが復元できなかったときに、原因を切り分けるための情報を作る。
+ *
+ * 「Cookie が端末から消えている」のか「Cookie はあるが壊れている（分割された
+ * チャンクの片方だけ失われた等）」のかは、どちらも同じ症状（Supabase に
+ * 問い合わせが飛ばないまま未ログイン扱い）になるため、外形からは区別できない。
+ *
+ * 値はセッショントークンそのものなので絶対に出さない。名前と長さだけ記録する。
+ */
+export function describeAuthCookies(cookies: { name: string; value: string }[]): string {
+  const auth = cookies.filter((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+  if (auth.length === 0) {
+    const others = cookies.map((c) => c.name).join(",") || "(none)";
+    return `authCookies=0 otherCookies=[${others}]`;
+  }
+  const parts = auth.map((c) => `${c.name}:${c.value.length}B`).join(" ");
+  return `authCookies=${auth.length} ${parts}`;
 }
