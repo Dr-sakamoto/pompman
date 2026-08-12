@@ -1,14 +1,28 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
-import { describeAuthCookies, getUserResilient, hasAuthCookie } from "@/lib/supabase/auth";
+import {
+  PROXY_USER_ID_HEADER,
+  describeAuthCookies,
+  getUserResilient,
+  hasAuthCookie,
+  isSessionFresh,
+} from "@/lib/supabase/auth";
 import { AUTH_COOKIE_OPTIONS } from "@/lib/supabase/cookies";
 import { SESSION_BACKUP_COOKIE, SESSION_BACKUP_OPTIONS } from "@/lib/supabase/session-backup";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
+type CookieToSet = { name: string; value: string; options: CookieOptions };
+
 export default async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  /*
+   * Supabase が書き戻す Cookie は貯めておき、最後にレスポンスへまとめて載せる。
+   * 以前は setAll のたびにレスポンスを作り直していたが、それだと
+   * 「ユーザーが分かってからリクエストヘッダーを足す」ことができない。
+   */
+  const pendingCookies: CookieToSet[] = [];
 
   const supabase = createServerClient(supabaseUrl(), supabaseAnonKey(), {
     cookieOptions: AUTH_COOKIE_OPTIONS,
@@ -17,23 +31,48 @@ export default async function proxy(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        for (const { name, value } of cookiesToSet) {
-          request.cookies.set(name, value);
-        }
-        response = NextResponse.next({ request });
         for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
+          request.cookies.set(name, value);
+          pendingCookies.push({ name, value, options });
         }
       },
     },
   });
 
-  // getUser() を呼ぶことでセッションが更新され、Cookie が書き戻される。
   // Cookie が無いなら問い合わせるまでもなく未ログイン。
   const signedIn = hasAuthCookie(request.cookies.getAll());
-  let { user, networkFailure, authError } = signedIn
-    ? await getUserResilient(supabase)
-    : { user: null, networkFailure: false, authError: undefined as string | undefined };
+  let user: User | null = null;
+  let networkFailure = false;
+  let authError: string | undefined;
+
+  if (signedIn) {
+    /*
+     * 【速い道】Cookie に入っているセッションをそのまま使う。
+     *
+     * getUser() は毎回 Supabase Auth への往復が発生する。ここは全ページ・
+     * 全 Server Action・プリフェッチのすべてが通る場所なので、その往復が
+     * そのまま「タップしてから画面が変わるまでの待ち時間」に化けていた。
+     * getSession() は Cookie を読むだけで通信しない（期限切れのときだけ
+     * トークン更新が飛ぶ）。
+     *
+     * 署名を検証していないセッションを信じてよいのは、ここでの判定の用途が
+     * 「ログイン画面に飛ばすかどうか」だけだから。データの読み書きは例外なく
+     * Supabase 越し（RLS 付き）で、トークンの署名はその都度あちら側で
+     * 検証される。偽のトークンを持ち込んでもページの器が出るだけで、
+     * requireMember() が users を引いた時点で弾かれ /login に戻る。
+     */
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session && isSessionFresh(session)) {
+      user = session.user;
+    } else {
+      // 【確実な道】セッションが無い・期限切れ・更新に失敗した。
+      // 未ログインなのか通信できなかっただけなのかを、リトライしつつ見極める。
+      ({ user, networkFailure, authError } = await getUserResilient(supabase));
+    }
+  }
 
   /*
    * 本体のセッション Cookie から復元できなかったが、控えの refresh token が
@@ -62,7 +101,11 @@ export default async function proxy(request: NextRequest) {
       data: { session },
     } = await supabase.auth.getSession();
     if (session?.refresh_token && session.refresh_token !== backupToken) {
-      response.cookies.set(SESSION_BACKUP_COOKIE, session.refresh_token, SESSION_BACKUP_OPTIONS);
+      pendingCookies.push({
+        name: SESSION_BACKUP_COOKIE,
+        value: session.refresh_token,
+        options: SESSION_BACKUP_OPTIONS,
+      });
     }
   }
 
@@ -73,13 +116,13 @@ export default async function proxy(request: NextRequest) {
   // ここで飛ばすと、復帰直後の一瞬の通信失敗でログイン画面に戻されてしまう。
   if (networkFailure) {
     logSessionLoss(request, "networkFailure", authError);
-    return response;
+    return buildResponse(request, null, pendingCookies);
   }
 
   // ログイン済みならログイン画面に留まらせない。控えから復旧できた場合に
   // ここを通る。POST を弾くと再ログインが壊れるので GET だけを対象にする。
   if (user && isPublic && request.method === "GET") {
-    return redirectTo(request, "/", response);
+    return redirectTo(request, "/", pendingCookies);
   }
 
   if (!user && !isPublic) {
@@ -94,27 +137,46 @@ export default async function proxy(request: NextRequest) {
      */
     logSessionLoss(request, "redirectToLogin", authError);
 
-    return redirectTo(request, "/login", response);
+    return redirectTo(request, "/login", pendingCookies);
   }
 
+  return buildResponse(request, user?.id ?? null, pendingCookies);
+}
+
+/**
+ * 後段へ渡すレスポンスを組み立てる。
+ *
+ * 分かったユーザーの id をリクエストヘッダーに載せて、ページ側が
+ * getUser() をやり直さずに済むようにする（PROXY_USER_ID_HEADER 参照）。
+ * 外から来た同名のヘッダーは、値を入れる前に必ず捨てる。
+ */
+function buildResponse(request: NextRequest, userId: string | null, cookies: CookieToSet[]) {
+  const headers = new Headers(request.headers);
+  headers.delete(PROXY_USER_ID_HEADER);
+  if (userId) headers.set(PROXY_USER_ID_HEADER, userId);
+
+  const response = NextResponse.next({ request: { headers } });
+  for (const { name, value, options } of cookies) {
+    response.cookies.set(name, value, options);
+  }
   return response;
 }
 
 /**
  * リダイレクトしつつ、それまでに書いた Cookie を引き継ぐ。
  *
- * NextResponse.redirect() は新しいレスポンスなので、そのまま返すと
+ * NextResponse.redirect() は新しいレスポンスなので、Cookie を載せ直さないと
  * セッションの更新や控えの保存がすべて捨てられる。控えから復旧した直後に
  * これをやると、復旧 → 破棄 → 復旧 … と無限に繰り返すことになる。
  */
-function redirectTo(request: NextRequest, pathname: string, current: NextResponse) {
+function redirectTo(request: NextRequest, pathname: string, cookies: CookieToSet[]) {
   const url = request.nextUrl.clone();
   url.pathname = pathname;
   url.search = "";
 
   const redirected = NextResponse.redirect(url);
-  for (const cookie of current.cookies.getAll()) {
-    redirected.cookies.set(cookie);
+  for (const { name, value, options } of cookies) {
+    redirected.cookies.set(name, value, options);
   }
   return redirected;
 }

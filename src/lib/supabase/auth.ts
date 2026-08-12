@@ -1,4 +1,4 @@
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 /**
  * Supabase のセッション Cookie が入っているか。
@@ -7,6 +7,35 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
  */
 export function hasAuthCookie(cookies: { name: string }[]): boolean {
   return cookies.some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+}
+
+/**
+ * proxy が確かめたログインユーザーの id を、ページ側へ渡すためのヘッダー。
+ *
+ * proxy と各ページはどちらも「今このリクエストは誰なのか」を必要とするが、
+ * それぞれが getUser() を呼ぶと Supabase Auth への往復が1回の画面遷移で
+ * 2回発生する。proxy が出した答えをそのまま渡せば、後段は往復を省ける。
+ *
+ * このヘッダーは proxy が必ず上書きする（外から同名のヘッダーが来ていても
+ * 捨てる）ので、ページ側から見れば偽装できない。proxy を通らずにページが
+ * 描画されることは無い（matcher は静的ファイルしか除外していない）が、
+ * 万一無ければ後段は自前で getUser() する作りにしてある。
+ */
+export const PROXY_USER_ID_HEADER = "x-pompman-user-id";
+
+/** 期限切れ間際のセッションは「まだ有効」とみなさない余裕（秒）。 */
+const SESSION_EXPIRY_MARGIN_SEC = 60;
+
+/**
+ * アクセストークンの期限がまだ十分に残っているか。
+ *
+ * getSession() は期限切れなら勝手に更新しに行くが、その判断は
+ * ライブラリ側の閾値に委ねられている。こちらでも余裕を持って確かめて、
+ * 「残り数秒のトークンを有効と信じて先へ進む」ことが無いようにする。
+ */
+export function isSessionFresh(session: Session): boolean {
+  if (!session.expires_at) return false;
+  return session.expires_at - SESSION_EXPIRY_MARGIN_SEC > Math.floor(Date.now() / 1000);
 }
 
 /**
