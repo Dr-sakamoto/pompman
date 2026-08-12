@@ -156,6 +156,40 @@ eq   "上限はお題ごと（別のお題には出せる）" "1" $ERIN \
      "insert into odai(author_id,text) values ('$ERIN','別のお題'); insert into answers(odai_id,author_id,text) values (currval('odai_id_seq'),'$ERIN','別のお題への回答'); select count(*) from answers_view where odai_id=currval('odai_id_seq') and is_mine;"
 
 echo
+echo "== お題の編集・削除は出題者だけ・未回答の間だけ =="
+# UPDATE/DELETE は INSERT と違い、USING が弾いた行はエラーではなく0件更新/0件削除に
+# なる（deny() はエラー終了を見るので使えない）。ok() + eq() で「実行はできたが
+# 中身は変わっていない」ことを確認する（0009 の picks_delete テストと同じ形）。
+ok   "dave がお題を作る（編集削除のテスト用）"  $DAVE "insert into odai(author_id,text) values ('$DAVE','編集削除テスト用のお題');"
+O_EDIT=$($PSQL -c "select max(id) from odai;")
+ok   "出題者以外の UPDATE は0件に絞られる"   $ERIN  "update odai set text='改ざん' where id=$O_EDIT;"
+eq   "編集されていない"                            "編集削除テスト用のお題" $DAVE "select text from odai where id=$O_EDIT;"
+ok   "出題者は未回答なら編集できる"          $DAVE  "update odai set text='編集後のお題' where id=$O_EDIT;"
+eq   "編集された"                                  "編集後のお題" $DAVE "select text from odai where id=$O_EDIT;"
+ok   "出題者以外の DELETE は0件に絞られる"   $ERIN  "delete from odai where id=$O_EDIT;"
+eq   "削除されていない（存在する）"                "1" $DAVE "select count(*) from odai where id=$O_EDIT;"
+
+ok   "erin が回答する"                       $ERIN  "insert into answers(odai_id,author_id,text) values ($O_EDIT,'$ERIN','erin の回答');"
+ok   "回答が付いた後の出題者の UPDATE も0件に絞られる" $DAVE "update odai set text='もう編集できないはず' where id=$O_EDIT;"
+eq   "編集されていない"                            "編集後のお題" $DAVE "select text from odai where id=$O_EDIT;"
+ok   "回答が付いた後の出題者の DELETE も0件に絞られる" $DAVE "delete from odai where id=$O_EDIT;"
+eq   "削除されていない（存在する）"                "1" $DAVE "select count(*) from odai where id=$O_EDIT;"
+
+ok   "dave がもう1つお題を作る（削除のテスト用）" $DAVE "insert into odai(author_id,text) values ('$DAVE','削除テスト用のお題');"
+O_DEL=$($PSQL -c "select max(id) from odai;")
+ok   "未回答なら出題者は削除できる"          $DAVE  "delete from odai where id=$O_DEL;"
+eq   "削除された"                                  "0" $DAVE "select count(*) from odai where id=$O_DEL;"
+
+ok   "dave がもう1つお題を作る（closed のテスト用）" $DAVE "insert into odai(author_id,text) values ('$DAVE','締切後編集テスト用');"
+O_CLOSED=$($PSQL -c "select max(id) from odai;")
+ok   "erin が回答する"                       $ERIN  "insert into answers(odai_id,author_id,text) values ($O_CLOSED,'$ERIN','erin の回答');"
+ok   "出題者が締め切る"                      $DAVE  "select close_odai($O_CLOSED);"
+ok   "closed 後の出題者の UPDATE も0件に絞られる" $DAVE "update odai set text='締切後の改ざん' where id=$O_CLOSED;"
+eq   "編集されていない（closed）"                  "締切後編集テスト用" $DAVE "select text from odai where id=$O_CLOSED;"
+ok   "closed 後の出題者の DELETE も0件に絞られる" $DAVE "delete from odai where id=$O_CLOSED;"
+eq   "削除されていない（closed、存在する）"        "1" $DAVE "select count(*) from odai where id=$O_CLOSED;"
+
+echo
 echo "== 5人・複数回答・誰にも選ばれない回答あり =="
 ok   "carol がお題を作る" $CAROL "insert into odai(author_id,text) values ('$CAROL','最悪の目覚まし時計とは');"
 O3=$($PSQL -c "select max(id) from odai;")

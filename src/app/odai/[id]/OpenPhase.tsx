@@ -1,8 +1,17 @@
 "use client";
 
-import { useActionState, useMemo, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { closeOdai, submitAnswer, submitPicks, unlockAnswers, type ActionState } from "@/app/actions";
+import {
+  closeOdai,
+  deleteOdai,
+  editOdai,
+  submitAnswer,
+  submitPicks,
+  unlockAnswers,
+  type ActionState,
+  type EditOdaiState,
+} from "@/app/actions";
 import { ErrorText, Panel } from "@/components/ui";
 import { seededOrder } from "@/lib/scoring";
 import { MAX_ANSWERS_PER_ODAI, MAX_PICKS, type AnswerView, type Odai, type Pick } from "@/lib/types";
@@ -71,8 +80,96 @@ export function OpenPhase({
         />
       )}
 
+      {isOwner && answerCount === 0 && <EditDeleteOdaiPanel odai={odai} />}
+
       {isOwner && <CloseOdaiButton odaiId={odai.id} />}
     </div>
+  );
+}
+
+/**
+ * お題の編集・削除。出題者だけに見える。まだ誰も回答していない間だけ操作できる
+ * （回答が付いた後にお題の本文が変わったり消えたりすると、その回答が何に対する
+ * 回答か分からなくなるため。実際の許可判定は DB 側の RLS）。
+ */
+function EditDeleteOdaiPanel({ odai }: { odai: Odai }) {
+  const [editing, setEditing] = useState(false);
+  const [editState, editAction, editPending] = useActionState<EditOdaiState, FormData>(
+    editOdai,
+    {},
+  );
+  const [deleteState, deleteAction, deletePending] = useActionState<ActionState, FormData>(
+    deleteOdai,
+    {},
+  );
+
+  useEffect(() => {
+    if (editState.done) setEditing(false);
+  }, [editState]);
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-3 border-t border-line pt-4 text-sm">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-muted hover:text-white"
+        >
+          お題を編集する
+        </button>
+        <form
+          action={deleteAction}
+          onSubmit={(e) => {
+            if (!window.confirm("このお題を削除します。よろしいですか？")) {
+              e.preventDefault();
+            }
+          }}
+        >
+          <input type="hidden" name="odai_id" value={odai.id} />
+          <button
+            type="submit"
+            disabled={deletePending}
+            className="text-red-300 hover:text-red-200 disabled:opacity-40"
+          >
+            {deletePending ? "削除中…" : "お題を削除する"}
+          </button>
+        </form>
+        <ErrorText message={deleteState.error} />
+      </div>
+    );
+  }
+
+  return (
+    <Panel className="space-y-3 border-t border-line">
+      <form action={editAction} className="space-y-3">
+        <input type="hidden" name="odai_id" value={odai.id} />
+        <textarea
+          name="text"
+          required
+          rows={3}
+          maxLength={200}
+          defaultValue={odai.text}
+          className="w-full resize-none rounded-md border border-line bg-ink px-3 py-2 outline-none focus:border-accent"
+        />
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={editPending}
+            className="flex-1 rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
+          >
+            {editPending ? "保存中…" : "保存する"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-md border border-line px-4 py-2 text-sm hover:border-white/25"
+          >
+            キャンセル
+          </button>
+        </div>
+        <ErrorText message={editState.error} />
+      </form>
+    </Panel>
   );
 }
 
