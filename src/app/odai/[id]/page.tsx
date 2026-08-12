@@ -12,19 +12,21 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const odaiId = Number(id);
   if (!Number.isInteger(odaiId)) notFound();
 
-  const { user } = await requireMember();
   const supabase = await createClient();
 
-  const { data: odaiRow } = await supabase
-    .from("odai")
-    .select("*")
-    .eq("id", odaiId)
-    .maybeSingle();
-  if (!odaiRow) notFound();
-  const odai = odaiRow as Odai;
-
-  const [{ data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }, { data: unlockRow }] =
+  /*
+   * requireMember() と odai・回答・picks・users・回答数・解禁状態のクエリは
+   * 互いの結果に依存していないので、直列に待たず同時に投げる。
+   *
+   * answer_unlocks は odai_id だけで絞り、user_id では絞らない: この配列を
+   * 組み立てている時点では requireMember() の結果（user）がまだ解決して
+   * いないので、同じ配列内から user.id を参照できない。RLS がそもそも
+   * 「自分の行 or 結果発表後」しか返さないので、受け取ってから絞ればよい。
+   */
+  const [{ user }, { data: odaiRow }, { data: answerRows }, { data: pickRows }, { data: userRows }, { data: countRows }, { data: unlockRows }] =
     await Promise.all([
+      requireMember(),
+      supabase.from("odai").select("*").eq("id", odaiId).maybeSingle(),
       // 解禁する（unlock_answers）まで、他人の回答は1行も返ってこない（answers_view）。
       // 結果発表前は author_id も伏せられている。
       supabase
@@ -39,14 +41,11 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       supabase.rpc("odai_answer_counts"),
       // 自分がこのお題を解禁済みかどうか（未解禁だと answers_view が自分の分しか返らないので、
       // 「まだ誰も他に回答していない」のか「単に未解禁」なのかを区別するのに要る）。
-      supabase
-        .from("answer_unlocks")
-        .select("odai_id")
-        .eq("odai_id", odaiId)
-        .eq("user_id", user.id)
-        .maybeSingle(),
+      supabase.from("answer_unlocks").select("odai_id, user_id").eq("odai_id", odaiId),
     ]);
 
+  if (!odaiRow) notFound();
+  const odai = odaiRow as Odai;
   const answers = (answerRows ?? []) as AnswerView[];
   const picks = (pickRows ?? []) as Pick[];
   const handles = new Map(((userRows ?? []) as AppUser[]).map((u) => [u.id, u.handle]));
@@ -54,7 +53,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     ((countRows ?? []) as { odai_id: number; answer_count: number }[]).find(
       (r) => r.odai_id === odaiId,
     )?.answer_count ?? 0;
-  const unlocked = unlockRow !== null;
+  const unlocked = (unlockRows ?? []).some((r) => r.user_id === user.id);
   const isOwner = odai.author_id === user.id;
 
   return (

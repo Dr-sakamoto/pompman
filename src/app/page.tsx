@@ -9,10 +9,14 @@ import { AiProgress } from "@/components/AiProgress";
 const SECTIONS: Phase[] = ["open", "closed"];
 
 export default async function HomePage() {
-  const { user } = await requireMember();
   const supabase = await createClient();
 
+  /*
+   * requireMember() と一覧系のクエリは互いの結果に依存していないので、
+   * 直列に待たず同時に投げる。
+   */
   const [
+    { user },
     { data: odaiRows },
     { data: myAnswers },
     { data: countRows },
@@ -20,13 +24,17 @@ export default async function HomePage() {
     { data: myPicks },
     { data: progressRows },
   ] = await Promise.all([
+    requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
     // 自分の回答はいつでも読める（他人の回答は自分が解禁するまで読めない）。
     supabase.from("answers_view").select("odai_id").eq("is_mine", true),
     // 回答数は件数だけなので、まだ回答していないお題の分も出る。
     supabase.rpc("odai_answer_counts"),
-    supabase.from("answer_unlocks").select("odai_id").eq("user_id", user.id),
-    supabase.from("picks").select("odai_id").eq("voter_id", user.id),
+    // RLS により、結果発表前は自分の行しか返らない。user_id / voter_id での絞り込みは
+    // 受け取ってから行う（requireMember() の結果である user.id を、それがまだ
+    // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
+    supabase.from("answer_unlocks").select("odai_id, user_id"),
+    supabase.from("picks").select("odai_id, voter_id"),
     supabase.rpc("ai_progress_stats"),
   ]);
 
@@ -41,8 +49,12 @@ export default async function HomePage() {
       Number(r.answer_count),
     ]),
   );
-  const unlocked = new Set((unlockRows ?? []).map((r) => r.odai_id as number));
-  const scored = new Set((myPicks ?? []).map((p) => p.odai_id as number));
+  const unlocked = new Set(
+    (unlockRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
+  );
+  const scored = new Set(
+    (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
+  );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
   return (

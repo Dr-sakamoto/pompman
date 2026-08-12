@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createClient } from "./supabase/server";
 import { getUserResilient } from "./supabase/auth";
 import type { AppUser } from "./types";
@@ -6,8 +7,15 @@ import type { AppUser } from "./types";
 /**
  * ログイン済みかつ handle 登録済みであることを保証する。
  * どちらか欠けていたら適切な画面に飛ばす。
+ *
+ * cache() で1リクエストにつき1回だけ実行する。回答を送ると Server Action と
+ * その後の再レンダリングの両方から呼ばれるが、同じリクエストの中で認証状態が
+ * 変わることはないので、Auth サーバーと users テーブルへの往復を2回する意味がない。
  */
-export async function requireMember(): Promise<{ user: AppUser; authId: string }> {
+export const requireMember = cache(async function requireMember(): Promise<{
+  user: AppUser;
+  authId: string;
+}> {
   const supabase = await createClient();
   const { user: authUser, networkFailure } = await getUserResilient(supabase);
 
@@ -28,7 +36,7 @@ export async function requireMember(): Promise<{ user: AppUser; authId: string }
   if (!profile) redirect("/onboarding");
 
   return { user: profile as AppUser, authId: authUser.id };
-}
+});
 
 /**
  * admin ロールであることを保証する。
