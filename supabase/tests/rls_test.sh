@@ -43,7 +43,7 @@ eq() { # eq <desc> <expected> <uid> <sql>
 
 echo "== seed =="
 $PSQL -v ON_ERROR_STOP=1 <<SQL
-truncate public.picks, public.answers, public.odai, public.users, auth.users restart identity cascade;
+truncate public.picks, public.answer_unlocks, public.answers, public.odai, public.users, auth.users restart identity cascade;
 insert into auth.users(id,email) values
   ('$ALICE','a@x.test'), ('$BOB','b@x.test'), ('$CAROL','c@x.test');
 insert into public.users(id,handle,terms_accepted_at) values
@@ -71,40 +71,45 @@ B1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$BOB' order
 B2=$($PSQL -c "select id from answers where odai_id=1 and author_id='$BOB' order by id offset 1 limit 1;")
 
 echo
-echo "-- 回答するまで他人の回答は見えない --"
+echo "-- 回答するだけでは他人の回答は見えない・解禁も採点もできない --"
 eq   "未回答の carol には1件も見えない"            "0" $CAROL "select count(*) from answers_view where odai_id=1;"
 eq   "未回答でも回答数だけは分かる"                "3" $CAROL "select answer_count from odai_answer_counts() where odai_id=1;"
-deny "未回答では採点できない"                $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
-deny "未回答では picks を直接入れられない"   $CAROL "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$CAROL',$A1,1);"
-eq   "回答した bob には全部見えている"             "3" $BOB   "select count(*) from answers_view where odai_id=1;"
-eq   "誰が書いたかは伏せられている"                "0" $BOB   "select count(*) from answers_view where odai_id=1 and author_id is not null and not is_mine;"
-eq   "自分の回答だけは自分と分かる"                "2" $BOB   "select count(*) from answers_view where odai_id=1 and is_mine;"
+deny "回答していないと解禁できない"          $CAROL "select unlock_answers(1);"
+deny "回答していないと解禁ログも直接は作れない" $CAROL "insert into answer_unlocks(odai_id,user_id) values (1,'$CAROL');"
+eq   "回答しただけでは他人の回答は見えない(bob)"   "2" $BOB "select count(*) from answers_view where odai_id=1;"
+deny "解禁前は採点できない(bob)"             $BOB   "select submit_picks(1, array[$A1]::bigint[]);"
+deny "解禁前は picks を直接入れられない(bob)" $BOB  "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$BOB',$A1,1);"
 
 echo
-echo "-- 回答した瞬間に解禁され、そのまま採点できる --"
-ok   "carol が回答する"                      $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','キャロルの回答');"
+echo "-- 出し切ってから解禁すると全部見えて採点できる。解禁は片道切符 --"
+ok   "bob が解禁する"                        $BOB   "select unlock_answers(1);"
+eq   "解禁した瞬間に全部見える(bob)"               "3" $BOB "select count(*) from answers_view where odai_id=1;"
+eq   "誰が書いたかは伏せられている"                "0" $BOB "select count(*) from answers_view where odai_id=1 and author_id is not null and not is_mine;"
+deny "解禁後は回答を追加できない(bob)"       $BOB   "insert into answers(odai_id,author_id,text) values (1,'$BOB','解禁後の回答');"
+deny "二重に解禁できない(bob)"               $BOB   "select unlock_answers(1);"
+ok   "bob がそのまま採点できる"              $BOB   "select submit_picks(1, array[$A1]::bigint[]);"
+deny "自分の回答は選べない(bob)"             $BOB   "select submit_picks(1, array[$B1]::bigint[]);"
+deny "他人名義で採点できない"                $ALICE "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$BOB',$A1,1);"
+
+echo
+echo "-- 誰かが解禁したあとでも、まだ解禁していない人は回答を書き足せる --"
+ok   "carol が回答する（まだ未解禁）"        $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','キャロルの回答');"
 C1=$($PSQL -c "select id from answers where odai_id=1 and author_id='$CAROL' order by id limit 1;")
-eq   "回答した瞬間に全部見える"                    "4" $CAROL "select count(*) from answers_view where odai_id=1;"
-ok   "そのまま採点できる"                    $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
-eq   "3つ未満でも採点は成立する"                   "2" $CAROL "select count(*) from picks where voter_id='$CAROL';"
-deny "自分の回答は選べない"                  $ALICE "select submit_picks(1, array[$A1]::bigint[]);"
+eq   "解禁済みの bob にも carol の新しい回答が見える" "4" $BOB "select count(*) from answers_view where odai_id=1;"
+eq   "carol 自身はまだ他人の回答が見えない"        "1" $CAROL "select count(*) from answers_view where odai_id=1;"
+
+ok   "carol が解禁する"                      $CAROL "select unlock_answers(1);"
+eq   "carol も解禁すれば全部見える"                "4" $CAROL "select count(*) from answers_view where odai_id=1;"
+deny "同じ回答を2つの順位に選べない"         $CAROL "select submit_picks(1, array[$A1,$A1]::bigint[]);"
+ok   "carol が alice と bob の回答を選ぶ"    $CAROL "select submit_picks(1, array[$A1,$B1]::bigint[]);"
+
+ok   "alice が解禁する"                      $ALICE "select unlock_answers(1);"
+deny "自分の回答は選べない(alice)"           $ALICE "select submit_picks(1, array[$A1]::bigint[]);"
 deny "自分の回答は直接 insert でも選べない"  $ALICE "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$ALICE',$A1,1);"
-deny "他人名義で採点できない"                $ALICE "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$BOB',$B1,1);"
-deny "同じ回答を2つの順位に選べない"         $ALICE "select submit_picks(1, array[$B1,$B1]::bigint[]);"
-ok   "alice が bob の回答2つを選ぶ"          $ALICE "select submit_picks(1, array[$B2,$B1]::bigint[]);"
+ok   "alice が bob と carol の回答を選ぶ"    $ALICE "select submit_picks(1, array[$B2,$B1,$C1]::bigint[]);"
 ok   "alice が選び直せる"                    $ALICE "select submit_picks(1, array[$B1]::bigint[]);"
 eq   "選び直すと前の picks は残らない"             "1" $ALICE "select count(*) from picks where voter_id='$ALICE';"
-eq   "採点中は他人の picks が読めない"             "0" $BOB   "select count(*) from picks where odai_id=1;"
-
-echo
-echo "-- 採点が始まっていても回答は増やせる --"
-ok   "carol が採点のあとに2つめの回答を足す" $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','あとから来た回答');"
-C2=$($PSQL -c "select id from answers where odai_id=1 and author_id='$CAROL' order by id offset 1 limit 1;")
-eq   "回答は5件になった"                           "5" $BOB   "select count(*) from answers_view where odai_id=1;"
-eq   "carol の採点はそのまま残っている"            "2" $CAROL "select count(*) from picks where voter_id='$CAROL';"
-ok   "carol は増えた回答を含めて選び直せる"  $CAROL "select submit_picks(1, array[$B1,$B2,$A1]::bigint[]);"
-deny "選べる数より多くは選べない"            $BOB   "select submit_picks(1, array[$A1,$C1,$C2,$B1]::bigint[]);"
-ok   "bob は増えた回答も選べる"              $BOB   "select submit_picks(1, array[$C1,$A1]::bigint[]);"
+eq   "採点中は自分の分しか見えない(bob、全体は4件)" "1" $BOB   "select count(*) from picks where odai_id=1;"
 
 echo
 echo "== phase: closed（結果発表） =="
@@ -116,8 +121,8 @@ eq   "closed_at が入る"                            "t" $CAROL "select closed_
 
 deny "closed 後は回答できない"               $CAROL "insert into answers(odai_id,author_id,text) values (1,'$CAROL','遅刻回答');"
 deny "closed 後は採点できない"               $CAROL "select submit_picks(1, array[$A1]::bigint[]);"
-eq   "結果発表後は回答者名が開示される"            "5" $CAROL "select count(*) from answers_view where odai_id=1 and author_id is not null;"
-eq   "結果発表後は他人の picks も読める"           "6" $BOB   "select count(*) from picks where odai_id=1;"
+eq   "結果発表後は回答者名が開示される"            "4" $CAROL "select count(*) from answers_view where odai_id=1 and author_id is not null;"
+eq   "結果発表後は他人の picks も読める"           "4" $BOB   "select count(*) from picks where odai_id=1;"
 ok   "closed 後の DELETE は0件に絞られる"    $ALICE "delete from picks where voter_id='$ALICE';"
 eq   "alice の picks は消えていない"               "1" $ALICE "select count(*) from picks where voter_id='$ALICE';"
 deny "role の自己昇格はできない"             $BOB   "update users set role='admin' where id='$BOB';"
@@ -131,7 +136,7 @@ insert into auth.users(id,email) values ('$DAVE','d@x.test'), ('$ERIN','e@x.test
 insert into public.users(id,handle,terms_accepted_at) values
   ('$DAVE','dave',now()), ('$ERIN','erin',now());
 SQL
-eq   "結果発表後は、回答していない人にも全部見える" "5" $DAVE \
+eq   "結果発表後は、回答していない人にも全部見える" "4" $DAVE \
      "select count(*) from answers_view where odai_id=1;"
 
 ok   "dave がお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','限界に挑むお題');"
@@ -159,26 +164,43 @@ ok   "bob 回答"          $BOB   "insert into answers(odai_id,author_id,text) v
 ok   "carol 回答"        $CAROL "insert into answers(odai_id,author_id,text) values ($O3,'$CAROL','C の回答');"
 ok   "dave 回答"         $DAVE  "insert into answers(odai_id,author_id,text) values ($O3,'$DAVE','D の回答');"
 ok   "erin 回答"         $ERIN  "insert into answers(odai_id,author_id,text) values ($O3,'$ERIN','E の回答（全員にスベる）');"
-ok   "erin が2つめも出す" $ERIN "insert into answers(odai_id,author_id,text) values ($O3,'$ERIN','E の2つめ（これもスベる）');"
+ok   "erin が2つめも出す（解禁前ならまだ書き足せる）" $ERIN \
+     "insert into answers(odai_id,author_id,text) values ($O3,'$ERIN','E の2つめ（これもスベる）');"
 
 aid() { $PSQL -c "select id from answers where odai_id=$O3 and author_id='$1' order by id limit 1;"; }
 A=$(aid $ALICE); B=$(aid $BOB); C=$(aid $CAROL); D=$(aid $DAVE); E=$(aid $ERIN)
 E2=$($PSQL -c "select id from answers where odai_id=$O3 and author_id='$ERIN' order by id offset 1 limit 1;")
 
+deny "解禁前は採点できない(alice)" $ALICE "select submit_picks($O3, array[$B]::bigint[]);"
+
+ok   "alice が解禁する"              $ALICE "select unlock_answers($O3);"
 deny "4つは選べない"                 $ALICE "select submit_picks($O3, array[$B,$C,$D,$E]::bigint[]);"
 deny "同じ回答を2つの順位に選べない" $ALICE "select submit_picks($O3, array[$B,$B,$C]::bigint[]);"
 deny "他のお題の回答は混ぜられない"  $ALICE "select submit_picks($O3, array[$A1,$B,$C]::bigint[]);"
+ok   "alice が採点"                  $ALICE "select submit_picks($O3, array[$B,$C,$D]::bigint[]);"
 
-ok   "alice が採点"  $ALICE "select submit_picks($O3, array[$B,$C,$D]::bigint[]);"
-ok   "bob が採点"    $BOB   "select submit_picks($O3, array[$A,$C,$D]::bigint[]);"
-ok   "carol が採点"  $CAROL "select submit_picks($O3, array[$A,$B,$D]::bigint[]);"
-ok   "dave が採点"   $DAVE  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
-ok   "erin が採点"   $ERIN  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
+ok   "bob が解禁する"    $BOB   "select unlock_answers($O3);"
+ok   "bob が採点"        $BOB   "select submit_picks($O3, array[$A,$C,$D]::bigint[]);"
+ok   "carol が解禁する"  $CAROL "select unlock_answers($O3);"
+ok   "carol が採点"      $CAROL "select submit_picks($O3, array[$A,$B,$D]::bigint[]);"
+ok   "dave が解禁する"   $DAVE  "select unlock_answers($O3);"
+ok   "dave が採点"       $DAVE  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
+ok   "erin が解禁する"   $ERIN  "select unlock_answers($O3);"
+ok   "erin が採点"       $ERIN  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
 eq   "全員が採点しても自動では締まらない" "open" $ALICE "select phase from odai where id=$O3;"
 ok   "出題者が締め切る" $CAROL "select close_odai($O3);"
 eq   "締め切って closed"           "closed" $ALICE "select phase from odai where id=$O3;"
 eq   "erin の回答は誰にも選ばれていない" "0" $ALICE "select count(*) from picks where answer_id in ($E,$E2);"
 eq   "結果発表後は6件すべて見える（0票の回答も消えない）" "6" $ALICE "select count(*) from answers_view where odai_id=$O3;"
+
+# answers は authenticated に直接 SELECT を許していないので、この不変条件の検証だけは
+# RLS を経由しない superuser 接続（$PSQL 単体）で行う。
+violations=$($PSQL -c "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;")
+if [ "$violations" == "0" ]; then
+  echo "  PASS  解禁後に書かれた回答は1件も無い（全お題ぶん）  = 0"; pass=$((pass+1));
+else
+  echo "  FAIL  解禁後に書かれた回答は1件も無い（全お題ぶん）  期待:[0] 実際:[$violations]"; fail=$((fail+1));
+fi
 
 echo
 echo "== 仕様書 §8 の導出クエリ =="
@@ -199,8 +221,8 @@ echo "(B) 誰からも選ばれなかった回答（件数）:"
 $PSQL -c "select count(*) from answers a left join picks p on p.answer_id = a.id where p.id is null;"
 echo "(C) 特定メンバーの picks:"
 $PSQL -c "select odai_id, answer_id, rank from picks where voter_id = '$ALICE' order by odai_id, rank;"
-echo "(D) 他人の回答を見る前に書かれた回答（各人・各お題の1つ目）の件数:"
-$PSQL -c "select count(*) from (select distinct on (odai_id, author_id) id from answers order by odai_id, author_id, created_at) t;"
+echo "(D) 「解禁後に書かれた回答」が無いことの検証（0件であるべき）:"
+$PSQL -c "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
 
 echo
 echo "================ pass=$pass fail=$fail ================"

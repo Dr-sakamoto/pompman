@@ -20,18 +20,20 @@ export default async function HomePage() {
     { data: odaiRows },
     { data: myAnswers },
     { data: countRows },
+    { data: unlockRows },
     { data: myPicks },
     { data: progressRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
-    // 自分の回答はいつでも読める（他人の回答は自分が回答するまで読めない）。
+    // 自分の回答はいつでも読める（他人の回答は自分が解禁するまで読めない）。
     supabase.from("answers_view").select("odai_id").eq("is_mine", true),
     // 回答数は件数だけなので、まだ回答していないお題の分も出る。
     supabase.rpc("odai_answer_counts"),
-    // RLS により、結果発表前は自分の picks しか返らない。voter_id での絞り込みは
+    // RLS により、結果発表前は自分の行しか返らない。user_id / voter_id での絞り込みは
     // 受け取ってから行う（requireMember() の結果である user.id を、それがまだ
     // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
+    supabase.from("answer_unlocks").select("odai_id, user_id"),
     supabase.from("picks").select("odai_id, voter_id"),
     supabase.rpc("ai_progress_stats"),
   ]);
@@ -47,10 +49,11 @@ export default async function HomePage() {
       Number(r.answer_count),
     ]),
   );
+  const unlocked = new Set(
+    (unlockRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
+  );
   const scored = new Set(
-    (myPicks ?? [])
-      .filter((p) => p.voter_id === user.id)
-      .map((p) => p.odai_id as number),
+    (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
   );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
 
@@ -91,15 +94,20 @@ export default async function HomePage() {
               {rows.map((o) => {
                 const count = answerCount.get(o.id) ?? 0;
                 const mine = myAnswerCount.get(o.id) ?? 0;
+                const isUnlocked = unlocked.has(o.id);
                 const todo =
                   o.phase !== "open"
                     ? null
                     : mine === 0
                       ? "未回答"
-                      : // 他人の回答が1つも無いうちは採点できないので急かさない
-                        count > mine && !scored.has(o.id)
-                        ? "未採点"
-                        : null;
+                      : !isUnlocked
+                        ? // 他人の回答が1つも無いうちは解禁を急かさない
+                          count > mine
+                          ? "解禁できます"
+                          : null
+                        : !scored.has(o.id)
+                          ? "未採点"
+                          : null;
 
                 return (
                   <li key={o.id}>
