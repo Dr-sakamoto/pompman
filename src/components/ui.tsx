@@ -44,3 +44,15 @@ export function Panel({
     <div className={`rounded-lg border border-line bg-panel p-4 ${className}`}>{children}</div>
   );
 }
+
+/**
+ * 読み込み中の骨組み（loading.tsx から使う）。
+ *
+ * このアプリの画面はどれもログイン確認とデータ取得が終わるまで描画できない。
+ * loading.tsx を置かないと、その間ブラウザは前の画面を出したまま黙って待つので、
+ * タップしても何も起きていないように見える。中身の形だけ先に出しておけば、
+ * 遷移そのものは即座に起きる。
+ */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-white/10 ${className}`} aria-hidden />;
+}
