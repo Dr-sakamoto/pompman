@@ -129,6 +129,57 @@ export async function createOdai(_prev: ActionState, formData: FormData): Promis
   redirect(`/odai/${data.id}`);
 }
 
+export type EditOdaiState = ActionState & { done?: boolean };
+
+/** お題の編集。出題者本人・未回答・open のときだけ通る（判定は DB 側の RLS）。 */
+export async function editOdai(
+  _prev: EditOdaiState,
+  formData: FormData,
+): Promise<EditOdaiState> {
+  const odaiId = Number(formData.get("odai_id"));
+  const text = String(formData.get("text") ?? "").trim();
+  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
+  if (!text) return { error: "お題を入力してください" };
+  if (text.length > 200) return { error: "お題は200文字以内にしてください" };
+
+  await requireMember();
+  const supabase = await createClient();
+
+  const { error, data } = await supabase
+    .from("odai")
+    .update({ text })
+    .eq("id", odaiId)
+    .select("id");
+
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) {
+    return { error: "編集できません（すでに回答が付いているか、出題者ではありません）" };
+  }
+
+  revalidatePath(`/odai/${odaiId}`);
+  revalidatePath("/");
+  return { done: true };
+}
+
+/** お題の削除。出題者本人・未回答・open のときだけ通る（判定は DB 側の RLS）。 */
+export async function deleteOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const odaiId = Number(formData.get("odai_id"));
+  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
+
+  await requireMember();
+  const supabase = await createClient();
+
+  const { error, data } = await supabase.from("odai").delete().eq("id", odaiId).select("id");
+
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) {
+    return { error: "削除できません（すでに回答が付いているか、出題者ではありません）" };
+  }
+
+  revalidatePath("/");
+  redirect("/");
+}
+
 export async function submitAnswer(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));
   const text = String(formData.get("text") ?? "").trim();
