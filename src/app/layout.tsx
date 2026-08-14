@@ -56,6 +56,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 大喜利
               </Link>
               <div className="flex items-center gap-4">
+                <Link href="/ranking" className="text-sm text-muted hover:text-white">
+                  ランキング
+                </Link>
                 <Link href="/members" className="text-sm text-muted hover:text-white">
                   メンバー
                 </Link>
