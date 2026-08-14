@@ -15,6 +15,14 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const supabase = await createClient();
 
   /*
+   * 時間経過による自動解禁・自動締め切りを先に反映させる（一覧と同じ理由。
+   * 同時に投げると、解禁されたのに伏せられたままの画面を1回見せてしまう）。
+   * この画面は共有リンクから直接開かれることもあるので、一覧を経由しなくても
+   * ここで追いつくようにしておく。
+   */
+  await supabase.rpc("sweep_odai_deadlines");
+
+  /*
    * requireMember() と odai・回答・picks・users・回答数・解禁状態のクエリは
    * 互いの結果に依存していないので、直列に待たず同時に投げる。
    *

@@ -41,6 +41,16 @@ eq() { # eq <desc> <expected> <uid> <sql>
   else echo "  FAIL  $desc  期待:[$want] 実際:[$got]"; fail=$((fail+1)); fi
 }
 
+root_eq() { # root_eq <desc> <expected> <sql>
+  # RLS を経由しない superuser 接続で確かめる。「テーブル全体でどうなっているか」は
+  # authenticated からは原理的に見えない（answer_unlocks も picks も自分の行しか
+  # 返らない）ので、不変条件や全体の件数はこちらで見るしかない。
+  local desc="$1" want="$2"; shift 2
+  local got; got=$($PSQL -c "$*" | tail -1)
+  if [ "$got" == "$want" ]; then echo "  PASS  $desc  = $got"; pass=$((pass+1));
+  else echo "  FAIL  $desc  期待:[$want] 実際:[$got]"; fail=$((fail+1)); fi
+}
+
 echo "== seed =="
 $PSQL -v ON_ERROR_STOP=1 <<SQL
 truncate public.picks, public.answer_unlocks, public.answers, public.odai, public.users, auth.users restart identity cascade;
@@ -221,20 +231,89 @@ ok   "dave が解禁する"   $DAVE  "select unlock_answers($O3);"
 ok   "dave が採点"       $DAVE  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
 ok   "erin が解禁する"   $ERIN  "select unlock_answers($O3);"
 ok   "erin が採点"       $ERIN  "select submit_picks($O3, array[$A,$B,$C]::bigint[]);"
-eq   "全員が採点しても自動では締まらない" "open" $ALICE "select phase from odai where id=$O3;"
+# 自動締め切りには「作成から auto_unlock_idle() は必ず開けておく」猶予がある（0013）。
+# 作りたてのお題は、参加者が全員やり切っていても閉じない。猶予明けの挙動は
+# 「== 自動解禁と自動締め切り ==」で検証する。
+eq   "作りたてのうちは全員採点しても締まらない" "open" $ALICE "select phase from odai where id=$O3;"
 ok   "出題者が締め切る" $CAROL "select close_odai($O3);"
 eq   "締め切って closed"           "closed" $ALICE "select phase from odai where id=$O3;"
 eq   "erin の回答は誰にも選ばれていない" "0" $ALICE "select count(*) from picks where answer_id in ($E,$E2);"
 eq   "結果発表後は6件すべて見える（0票の回答も消えない）" "6" $ALICE "select count(*) from answers_view where odai_id=$O3;"
 
-# answers は authenticated に直接 SELECT を許していないので、この不変条件の検証だけは
-# RLS を経由しない superuser 接続（$PSQL 単体）で行う。
-violations=$($PSQL -c "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;")
-if [ "$violations" == "0" ]; then
-  echo "  PASS  解禁後に書かれた回答は1件も無い（全お題ぶん）  = 0"; pass=$((pass+1));
-else
-  echo "  FAIL  解禁後に書かれた回答は1件も無い（全お題ぶん）  期待:[0] 実際:[$violations]"; fail=$((fail+1));
-fi
+root_eq "解禁後に書かれた回答は1件も無い（全お題ぶん）" "0" \
+        "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
+
+echo
+echo "== 自動解禁と自動締め切り =="
+# 時間経過が引き金なので、経過は「行の時刻を過去にずらす」で再現する。
+# answers には UPDATE ポリシーが無い（回答は書き換えられない）ので、
+# ずらす操作だけは RLS を経由しない superuser 接続で行う。
+
+ok   "carol が自動解禁テスト用のお題を作る" $CAROL "insert into odai(author_id,text) values ('$CAROL','自動解禁テスト用');"
+O_AUTO=$($PSQL -c "select max(id) from odai;")
+ok   "alice 回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O_AUTO,'$ALICE','alice の回答');"
+ok   "bob 回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O_AUTO,'$BOB','bob の回答');"
+
+ok   "掃除を回せる" $ALICE "select sweep_odai_deadlines();"
+root_eq "書いた直後は解禁されない" "0" "select count(*) from answer_unlocks where odai_id=$O_AUTO;"
+eq   "他人の回答もまだ見えない" "1" $ALICE "select count(*) from answers_view where odai_id=$O_AUTO;"
+
+# alice と bob の回答だけを 25 時間前にずらす（しきい値は 24 時間）。
+$PSQL -c "update answers set created_at = now() - interval '25 hours' where odai_id=$O_AUTO;" > /dev/null
+ok   "掃除を回す（しきい値超え）" $ALICE "select sweep_odai_deadlines();"
+root_eq "回答した2人が自動で解禁される" "2" "select count(*) from answer_unlocks where odai_id=$O_AUTO;"
+eq   "未回答の carol は解禁されない" "0" $CAROL \
+     "select count(*) from answer_unlocks where odai_id=$O_AUTO and user_id='$CAROL';"
+ok   "未回答の carol はまだ回答できる" $CAROL \
+     "insert into answers(odai_id,author_id,text) values ($O_AUTO,'$CAROL','carol の後発回答');"
+
+eq   "自動解禁された alice に他人の回答が見える" "3" $ALICE "select count(*) from answers_view where odai_id=$O_AUTO;"
+deny "自動解禁された alice はもう回答を足せない" $ALICE \
+     "insert into answers(odai_id,author_id,text) values ($O_AUTO,'$ALICE','解禁後の追加');"
+deny "二重に解禁もできない" $ALICE "select unlock_answers($O_AUTO);"
+
+AU_B=$($PSQL -c "select id from answers where odai_id=$O_AUTO and author_id='$BOB' limit 1;")
+AU_A=$($PSQL -c "select id from answers where odai_id=$O_AUTO and author_id='$ALICE' limit 1;")
+ok   "自動解禁された alice は採点できる" $ALICE "select submit_picks($O_AUTO, array[$AU_B]::bigint[]);"
+
+# ここで参加者は alice / bob / carol の3人。carol は未解禁なので締まらない。
+ok   "bob が採点"   $BOB   "select submit_picks($O_AUTO, array[$AU_A]::bigint[]);"
+eq   "未解禁の参加者が残っていれば締まらない" "open" $ALICE "select phase from odai where id=$O_AUTO;"
+
+ok   "carol が解禁して採点" $CAROL "select unlock_answers($O_AUTO); select submit_picks($O_AUTO, array[$AU_A]::bigint[]);"
+eq   "猶予中はまだ締まらない" "open" $ALICE "select phase from odai where id=$O_AUTO;"
+
+# お題そのものを 25 時間前に作られたことにして猶予を明けさせる。
+$PSQL -c "update odai set created_at = now() - interval '25 hours' where id=$O_AUTO;" > /dev/null
+ok   "掃除を回す（猶予明け）" $ALICE "select sweep_odai_deadlines();"
+eq   "参加者が全員やり切ったので自動で発表される" "closed" $ALICE "select phase from odai where id=$O_AUTO;"
+eq   "closed_at が入る" "t" $ALICE "select closed_at is not null from odai where id=$O_AUTO;"
+eq   "発表後は誰が書いたかが出る" "3" $BOB \
+     "select count(*) from answers_view where odai_id=$O_AUTO and author_id is not null;"
+
+echo
+echo "-- 寿命による自動締め切り --"
+ok   "dave が寿命テスト用のお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','寿命テスト用');"
+O_AGE=$($PSQL -c "select max(id) from odai;")
+ok   "erin だけが回答" $ERIN "insert into answers(odai_id,author_id,text) values ($O_AGE,'$ERIN','erin だけの回答');"
+
+$PSQL -c "update odai set created_at = now() - interval '25 hours' where id=$O_AGE;" > /dev/null
+ok   "掃除を回す（猶予明け・参加者1人）" $DAVE "select sweep_odai_deadlines();"
+eq   "参加者が1人だけなら「全員やり切った」では締まらない" "open" $DAVE "select phase from odai where id=$O_AGE;"
+
+$PSQL -c "update odai set created_at = now() - interval '6 days' where id=$O_AGE;" > /dev/null
+ok   "掃除を回す（寿命超え）" $DAVE "select sweep_odai_deadlines();"
+eq   "寿命が来たら参加者1人でも発表される" "closed" $DAVE "select phase from odai where id=$O_AGE;"
+
+ok   "erin が回答0件のお題を作る" $ERIN "insert into odai(author_id,text) values ('$ERIN','誰も回答しないお題');"
+O_EMPTY=$($PSQL -c "select max(id) from odai;")
+$PSQL -c "update odai set created_at = now() - interval '30 days' where id=$O_EMPTY;" > /dev/null
+ok   "掃除を回す（回答0件・寿命超え）" $ERIN "select sweep_odai_deadlines();"
+eq   "回答が1件も無いお題は寿命が来ても閉じない" "open" $ERIN "select phase from odai where id=$O_EMPTY;"
+
+# 自動解禁でも「解禁後に書かれた回答」が生まれていないことを、ここで改めて直接見る。
+root_eq "自動解禁を挟んでも解禁後に書かれた回答は0件" "0" \
+        "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
 
 echo
 echo "== 仕様書 §8 の導出クエリ =="
