@@ -10,14 +10,17 @@ import {
  * 結果発表までの進捗バー。お題ごとに2本。
  *
  * 自動締め切りの条件は進み方の違う2本立てで（0013 / 0014）、片方は人、
- * もう片方は時間で進む。1本の棒にまとめると「あと何をすれば発表されるのか」も
+ * もう片方は時間で進む。1本の棒にまとめると「あと誰が何をすれば発表されるのか」も
  * 「あと何時間で勝手に発表されるのか」も両方分からなくなるので、そのまま2本出す。
  *
  *   人数 —— 参加者が全員やり切ったか。自分（と他の参加者）が動かせる棒
  *   時間 —— お題の寿命。放っておいても勝手に進む棒
  *
- * 先に満タンになったほうで発表される。数値は DB 側の odai_close_progress() が
- * 判定と同じ数え方で返したものを、そのまま比率にしているだけ。
+ * 先に満タンになったほうで発表される。
+ *
+ * 文字は極力足さない。バーは一目で見るものなので、毎回同じ説明を横に置くと
+ * 読み飛ばす対象になり、バー自体まで読み飛ばされる。1本につき「ラベル・棒・値」の
+ * 1行だけにして、文章はお題ごとに変わる1行（下の line）に集約する。
  */
 
 const MINUTE = 60_000;
@@ -25,14 +28,16 @@ const HOUR = 60 * MINUTE;
 
 type Tone = "accent" | "muted";
 
+type Track = { value: string; ratio: number; tone: Tone };
+
 type Derived = {
-  people: { value: string; ratio: number; note: string; tone: Tone };
-  time: { value: string; ratio: number; note: string; tone: Tone };
-  /** 多様性（参加者）とデータ量（回答・選好ペア）の現在値。回答0件のときは無し。 */
-  harvest: string | null;
+  people: Track;
+  time: Track;
+  /** 状態に応じて変わる1行。多様性（参加者）とデータ量（選好ペア）もここに出す。 */
+  line: string;
 };
 
-/** 「2日と3時間」「45分」。1分未満は「まもなく」。 */
+/** 「2日4時間」「45分」。1分未満は「まもなく」。 */
 function formatSpan(ms: number): string {
   if (ms <= 0) return "まもなく";
   const minutes = Math.floor(ms / MINUTE);
@@ -41,7 +46,7 @@ function formatSpan(ms: number): string {
   if (hours < 24) return `${hours}時間`;
   const days = Math.floor(hours / 24);
   const rest = hours % 24;
-  return rest === 0 ? `${days}日` : `${days}日と${rest}時間`;
+  return rest === 0 ? `${days}日` : `${days}日${rest}時間`;
 }
 
 function clamp01(x: number): number {
@@ -54,8 +59,6 @@ function derive(row: CloseProgressRow): Derived {
   // 合わせて念のため通しておく。
   const answers = Number(row.answer_count);
   const participants = Number(row.participants);
-  const unlocked = Number(row.unlocked);
-  const scored = Number(row.scored);
   const finished = Number(row.finished);
   const pairs = Number(row.preference_pairs);
 
@@ -74,17 +77,6 @@ function derive(row: CloseProgressRow): Derived {
    * 1/1 で満タンに見えてはいけない。1/2 と出せば「あと1人来れば動く」が分かる。
    */
   const needed = Math.max(participants, AUTO_CLOSE_MIN_PARTICIPANTS);
-  const peopleRatio = clamp01(finished / needed);
-
-  const peopleNote = !hasAnswers
-    ? "まだ誰も回答していません"
-    : participants < AUTO_CLOSE_MIN_PARTICIPANTS
-      ? `参加者があと${AUTO_CLOSE_MIN_PARTICIPANTS - participants}人でこの条件が動きます`
-      : finished < participants
-        ? `解禁 ${unlocked}/${participants}人・採点 ${scored}/${participants}人`
-        : graceLeft > 0
-          ? `全員やり切りました。お題を出してから${AUTO_UNLOCK_IDLE_HOURS}時間（あと${formatSpan(graceLeft)}）で発表されます`
-          : "まもなく発表されます";
 
   /*
    * 残りが自動解禁のしきい値を切ったら急かす。ここを過ぎると、いま書いた回答は
@@ -92,32 +84,28 @@ function derive(row: CloseProgressRow): Derived {
    */
   const urgent = hasAnswers && timeLeft <= AUTO_UNLOCK_IDLE_HOURS * HOUR;
 
-  const timeNote = !hasAnswers
-    ? `回答が1件も無いお題は、${AUTO_CLOSE_AGE_DAYS}日経っても発表されません`
-    : timeLeft <= 0
-      ? "寿命が来ています。次に誰かが開いたときに発表されます"
-      : `お題を出してから${AUTO_CLOSE_AGE_DAYS}日で自動発表`;
-
   return {
     people: {
       value: `${finished}/${needed}人`,
-      ratio: peopleRatio,
-      note: peopleNote,
+      ratio: clamp01(finished / needed),
       tone: "accent",
     },
     time: {
-      // 回答が0件のお題は寿命が来ても発表されないので、残り時間を出すと嘘になる
-      // （一覧の細いバーには説明が付かないぶん、ここで言い切っておく）。
+      // 回答が0件のお題は寿命が来ても発表されないので、残り時間を出すと嘘になる。
       value: !hasAnswers ? "回答待ち" : timeLeft > 0 ? `あと${formatSpan(timeLeft)}` : "まもなく",
       ratio: clamp01((asOf - createdAt) / (closeAt - createdAt)),
-      note: timeNote,
       tone: urgent ? "accent" : "muted",
     },
-    harvest: hasAnswers
-      ? pairs > 0
-        ? `いま発表すると、参加者${participants}人・回答${answers}件から選好ペア${pairs}組が残ります`
-        : `いま発表すると、参加者${participants}人・回答${answers}件。選好ペアはまだ0組（採点が入ると増えます）`
-      : null,
+    line: !hasAnswers
+      ? `回答が0件のお題は、${AUTO_CLOSE_AGE_DAYS}日経っても発表されません`
+      : participants < AUTO_CLOSE_MIN_PARTICIPANTS
+        ? `あと${AUTO_CLOSE_MIN_PARTICIPANTS - participants}人が回答すれば、人数でも発表できます`
+        : finished >= participants && graceLeft > 0
+          ? `全員やり切りました。あと${formatSpan(graceLeft)}で発表されます`
+          : pairs > 0
+            ? // 参加者の数は人数バーの分母がすでに出しているので、ここでは繰り返さない
+              `いま発表すると選好ペア${pairs}組`
+            : "採点が入ると選好ペアが貯まります",
   };
 }
 
@@ -126,70 +114,65 @@ const FILL: Record<Tone, string> = {
   muted: "bg-white/35",
 };
 
-function Bar({
-  label,
-  value,
-  ratio,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  ratio: number;
-  note: string;
-  tone: Tone;
-}) {
-  const percent = Math.round(ratio * 100);
+/** ラベル・棒・値で1行。詳細画面用。 */
+function Bar({ label, track }: { label: string; track: Track }) {
+  const percent = Math.round(track.ratio * 100);
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="font-bold">{label}</span>
-        <span className={tone === "accent" ? "font-bold text-accent" : "text-muted"}>{value}</span>
-      </div>
-      <div
+    <div className="flex items-center gap-3 text-xs">
+      <span className="w-8 shrink-0 font-bold">{label}</span>
+      <span
         role="progressbar"
         aria-label={`${label}の進捗`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent}
-        className="h-2 w-full overflow-hidden rounded-full bg-white/10"
+        className="h-2 flex-1 overflow-hidden rounded-full bg-white/10"
       >
-        <div
-          className={`h-full rounded-full transition-[width] ${FILL[tone]}`}
+        <span
+          className={`block h-full rounded-full transition-[width] ${FILL[track.tone]}`}
           style={{ width: `${percent}%` }}
         />
-      </div>
-      <p className="text-xs text-muted">{note}</p>
+      </span>
+      <span
+        className={`w-24 shrink-0 whitespace-nowrap text-right tabular-nums ${
+          track.tone === "accent" ? "font-bold text-accent" : "text-muted"
+        }`}
+      >
+        {track.value}
+      </span>
     </div>
   );
 }
 
-/** お題の詳細（phase=open）用。2本のバーと、いま取れる教師データの量。 */
+/** お題の詳細（phase=open）用。 */
 export function CloseProgress({ progress }: { progress: CloseProgressRow }) {
   const d = derive(progress);
 
   return (
-    <Panel className="space-y-3">
+    <Panel className="space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-sm font-bold">結果発表まで</p>
         <p className="text-xs text-muted">先に埋まったほうで自動発表</p>
       </div>
 
-      <Bar label="人数" {...d.people} />
-      <Bar label="時間" {...d.time} />
+      <Bar label="人数" track={d.people} />
+      <Bar label="時間" track={d.time} />
 
-      {d.harvest && <p className="border-t border-line pt-2 text-xs text-muted">{d.harvest}</p>}
+      <p className="text-xs text-muted">{d.line}</p>
     </Panel>
   );
 }
 
-function MiniBar({ label, value, ratio, tone }: { label: string; value: string; ratio: number; tone: Tone }) {
-  const percent = Math.round(ratio * 100);
+/**
+ * 一覧のカード用。ラベルは落として棒と値だけにする
+ * （「2/3人」「あと2日」で、どちらの棒かは値から分かる）。
+ */
+function MiniBar({ track, label }: { track: Track; label: string }) {
+  const percent = Math.round(track.ratio * 100);
 
   return (
     <div className="flex items-center gap-2 text-[10px] text-muted">
-      <span className="w-6 shrink-0">{label}</span>
       <span
         role="progressbar"
         aria-label={`${label}の進捗`}
@@ -199,23 +182,22 @@ function MiniBar({ label, value, ratio, tone }: { label: string; value: string; 
         className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"
       >
         <span
-          className={`block h-full rounded-full ${FILL[tone]}`}
+          className={`block h-full rounded-full ${FILL[track.tone]}`}
           style={{ width: `${percent}%` }}
         />
       </span>
-      <span className="w-24 shrink-0 whitespace-nowrap text-right tabular-nums">{value}</span>
+      <span className="w-16 shrink-0 whitespace-nowrap text-right tabular-nums">{track.value}</span>
     </div>
   );
 }
 
-/** 一覧のカード用。同じ2本を細く出す（説明は詳細画面に置く）。 */
 export function CloseProgressMini({ progress }: { progress: CloseProgressRow }) {
   const d = derive(progress);
 
   return (
     <div className="mt-3 space-y-1">
-      <MiniBar label="人数" value={d.people.value} ratio={d.people.ratio} tone={d.people.tone} />
-      <MiniBar label="時間" value={d.time.value} ratio={d.time.ratio} tone={d.time.tone} />
+      <MiniBar label="人数" track={d.people} />
+      <MiniBar label="時間" track={d.time} />
     </div>
   );
 }

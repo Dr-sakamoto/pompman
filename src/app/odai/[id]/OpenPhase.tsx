@@ -15,7 +15,6 @@ import {
 import { ErrorText, Panel } from "@/components/ui";
 import { seededOrder } from "@/lib/scoring";
 import {
-  AUTO_CLOSE_AGE_DAYS,
   AUTO_UNLOCK_IDLE_HOURS,
   MAX_ANSWERS_PER_ODAI,
   MAX_PICKS,
@@ -419,10 +418,11 @@ function CloseOdaiButton({ odaiId }: { odaiId: number }) {
       >
         {pending ? "処理中…" : "締め切って結果を発表する"}
       </button>
+      {/* 自動発表の条件は画面上部の進捗バー2本が出しているので、ここでは繰り返さない。 */}
       <p className="text-xs text-muted">
         出題者だけが操作できます。発表すると回答も採点も締め切られ、誰が何を書いて
-        誰を選んだかが全員に公開されます。押さなくても、回答した人が全員採点し終えるか、
-        お題を出してから{AUTO_CLOSE_AGE_DAYS}日経てば自動で発表されます。
+        誰を選んだかが全員に公開されます。押さなくても、上の2本のバーのどちらかが
+        埋まれば自動で発表されます。
       </p>
       <ErrorText message={state.error} />
     </form>
