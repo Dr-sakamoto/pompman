@@ -92,3 +92,23 @@ export const PHASE_LABEL: Record<Phase, string> = {
   open: "回答・採点中",
   closed: "結果発表",
 };
+
+/**
+ * contribution_ranking() の行。結果発表済み(closed)のお題だけを対象にした
+ * 投稿数（回答数・お題数）。open のお題の中身（誰が何を書いたか）は含まない。
+ */
+export type ContributionRankingRow = {
+  user_id: string;
+  handle: string;
+  answer_count: number;
+  odai_count: number;
+};
+
+/**
+ * my_streak() の行。呼び出し本人の連続参加日数
+ * （回答 or 採点のどちらかを行った日が対象、JST暦日）。
+ */
+export type StreakStats = {
+  streak_days: number;
+  last_active_date: string | null;
+};

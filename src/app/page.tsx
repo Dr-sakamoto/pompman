@@ -6,6 +6,8 @@ import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 import { CloseProgress } from "@/components/CloseProgress";
+import { StreakBadge } from "@/components/StreakBadge";
+import type { StreakStats } from "@/lib/types";
 
 const SECTIONS: Phase[] = ["open", "closed"];
 
@@ -36,6 +38,7 @@ export default async function HomePage() {
     { data: myPicks },
     { data: progressRows },
     { data: closeRows },
+    { data: streakRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
@@ -51,6 +54,8 @@ export default async function HomePage() {
     supabase.rpc("ai_progress_stats"),
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     supabase.rpc("odai_close_progress"),
+    // 連続参加日数（回答 or 採点）。自分の行しか返らないので誰かに見せる情報ではない。
+    supabase.rpc("my_streak"),
   ]);
 
   const odai = (odaiRows ?? []) as Odai[];
@@ -74,11 +79,15 @@ export default async function HomePage() {
   const closeProgress = new Map(
     ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
   );
+  const streak = (streakRows?.[0] ?? { streak_days: 0, last_active_date: null }) as StreakStats;
 
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted">{user.handle} さん</p>
+        <span className="flex items-center gap-2">
+          <p className="text-sm text-muted">{user.handle} さん</p>
+          <StreakBadge streak={streak} />
+        </span>
         <Link
           href="/odai/new"
           className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-ink"
