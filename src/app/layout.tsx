@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { ShareButton } from "@/components/ShareButton";
+import { ReloadButton } from "@/components/ReloadButton";
 import { RegisterServiceWorker } from "@/components/RegisterServiceWorker";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -58,6 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 メンバー
               </Link>
               <ShareButton />
+              <ReloadButton />
               <form action="/logout" method="post">
                 <button type="submit" className="text-sm text-muted hover:text-white">
                   ログアウト
