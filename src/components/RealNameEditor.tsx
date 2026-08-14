@@ -24,10 +24,11 @@ export function RealNameEditor({ userId, realName }: { userId: string; realName:
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="text-xs text-muted hover:text-white"
+        aria-label="本名メモ（管理者にのみ表示）"
         title="本名メモ（管理者にのみ表示）"
+        className="inline-block min-h-[1.25rem] min-w-[3rem] rounded border border-dashed border-line px-2 py-0.5 text-xs text-muted hover:border-accent hover:text-white"
       >
-        {realName ? `(${realName})` : "＋本名を記録"}
+        {realName || " "}
       </button>
     );
   }
@@ -38,23 +39,27 @@ export function RealNameEditor({ userId, realName }: { userId: string; realName:
       <input
         name="real_name"
         defaultValue={realName ?? ""}
-        placeholder="本名"
         autoFocus
+        aria-label="本名"
         className="w-28 rounded border border-line bg-ink px-2 py-0.5 text-xs outline-none focus:border-accent"
       />
       <button
         type="submit"
         disabled={pending}
-        className="text-xs text-accent hover:underline disabled:opacity-40"
+        aria-label="保存"
+        title="保存"
+        className="rounded border border-line px-1.5 py-0.5 text-xs text-accent hover:border-accent disabled:opacity-40"
       >
-        保存
+        ✓
       </button>
       <button
         type="button"
         onClick={() => setEditing(false)}
-        className="text-xs text-muted hover:text-white"
+        aria-label="取消"
+        title="取消"
+        className="rounded border border-line px-1.5 py-0.5 text-xs text-muted hover:border-accent hover:text-white"
       >
-        取消
+        ×
       </button>
       <ErrorText message={state.error} />
     </form>
