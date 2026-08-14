@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -8,6 +9,7 @@ import { SESSION_BACKUP_COOKIE, SESSION_BACKUP_OPTIONS } from "@/lib/supabase/se
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 import { requireAdmin, requireMember } from "@/lib/session";
 import { MAX_PICKS } from "@/lib/types";
+import { notifyNewOdai, notifyNewlyClosedOdai } from "@/lib/push/notify";
 
 export type ActionState = { error?: string };
 
@@ -125,6 +127,8 @@ export async function createOdai(_prev: ActionState, formData: FormData): Promis
 
   if (error) return { error: error.message };
 
+  after(() => notifyNewOdai(data.id, user.id, text));
+
   revalidatePath("/");
   redirect(`/odai/${data.id}`);
 }
@@ -232,6 +236,11 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
 
   if (error) return { error: error.message };
 
+  // submit_picks は「全員やり切った」を満たした瞬間にお題を closed へ進めうる
+  // （DB 側のトリガー、0013 参照）。起きたかどうかはここでは分からないので、
+  // 拾い漏れがないよう毎回呼ぶ（何も閉じていなければ何もしない）。
+  after(() => notifyNewlyClosedOdai());
+
   revalidatePath(`/odai/${odaiId}`);
   revalidatePath("/");
   return {};
@@ -250,6 +259,9 @@ export async function unlockAnswers(_prev: ActionState, formData: FormData): Pro
   const { error } = await supabase.rpc("unlock_answers", { p_odai_id: odaiId });
   if (error) return { error: error.message };
 
+  // submitPicks と同じ理由（最後の1人の解禁でも closed へ進みうる）。
+  after(() => notifyNewlyClosedOdai());
+
   revalidatePath(`/odai/${odaiId}`);
   revalidatePath("/");
   return {};
@@ -265,8 +277,42 @@ export async function closeOdai(_prev: ActionState, formData: FormData): Promise
   const { error } = await supabase.rpc("close_odai", { p_odai_id: odaiId });
   if (error) return { error: error.message };
 
+  after(() => notifyNewlyClosedOdai());
+
   revalidatePath(`/odai/${odaiId}`);
   revalidatePath("/");
+  return {};
+}
+
+/** Push 通知の購読を保存する。 */
+export async function savePushSubscription(sub: {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}): Promise<{ error?: string }> {
+  const { user } = await requireMember();
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    {
+      user_id: user.id,
+      endpoint: sub.endpoint,
+      p256dh: sub.keys.p256dh,
+      auth: sub.keys.auth,
+    },
+    { onConflict: "endpoint" },
+  );
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+/** Push 通知の購読を解除する。 */
+export async function deletePushSubscription(endpoint: string): Promise<{ error?: string }> {
+  await requireMember();
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  if (error) return { error: error.message };
   return {};
 }
 

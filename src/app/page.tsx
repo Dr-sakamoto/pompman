@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { CloseProgressRow, Odai, Phase } from "@/lib/types";
@@ -6,6 +7,8 @@ import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 import { CloseProgress } from "@/components/CloseProgress";
+import { PushSubscribeToggle } from "@/components/PushSubscribeToggle";
+import { notifyNewlyClosedOdai } from "@/lib/push/notify";
 
 const SECTIONS: Phase[] = ["open", "closed"];
 
@@ -26,6 +29,9 @@ export default async function HomePage() {
    * 「端末 ↔ サーバー」の往復とは桁が違う。
    */
   await supabase.rpc("sweep_odai_deadlines");
+  // 時間経過だけで closed へ進むぶんは、これを叩いた人以外は誰も気づけない
+  // （0016 参照）。ページ本体の応答を遅らせないよう、応答後にまわす。
+  after(() => notifyNewlyClosedOdai());
 
   const [
     { user },
@@ -86,6 +92,8 @@ export default async function HomePage() {
           お題を出す
         </Link>
       </div>
+
+      <PushSubscribeToggle />
 
       <AiProgress picksCount={picksCount} />
 

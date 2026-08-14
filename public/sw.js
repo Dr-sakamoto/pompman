@@ -71,3 +71,54 @@ self.addEventListener("fetch", (event) => {
     }),
   );
 });
+
+/*
+ * push / notificationclick はどちらも OS 側の通知UIを使うだけで、
+ * アプリ内に何かポップアップやモーダルを出すわけではない。
+ * notificationclick は既存のタブがあればそれをそのお題の画面へ移動して
+ * 前面に出すだけ、無ければ普通に新しいタブを開くだけ。
+ * これ以外に起動時フックは無いので、通知から開いた直後に何かに
+ * 塞がれることはない。
+ */
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    return;
+  }
+
+  const { title, body, url } = payload;
+  if (!title) return;
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: url || "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data && event.notification.data.url;
+  if (!url) return;
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === url && "focus" in client) return client.focus();
+      }
+      for (const client of clientList) {
+        if ("navigate" in client && "focus" in client) {
+          return client.focus().then(() => client.navigate(url));
+        }
+      }
+      return clients.openWindow(url);
+    }),
+  );
+});

@@ -128,6 +128,10 @@ cp .env.example .env.local
 
 `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` を Settings > API からコピーする。
 
+Push 通知（任意）を使うなら、`npx web-push generate-vapid-keys` で鍵を1組作り、
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` も埋める。
+未設定でも他の機能には影響しない（通知機能だけが黙って無効になる）。
+
 ### 5. 起動
 
 ```bash
@@ -357,9 +361,24 @@ where a.created_at > u.unlocked_at;
 (A) は voter_id ごとに分かれた状態で出てくる。全員分まとめれば「共通知の壺」、
 特定の人だけ抜けば「その人のプロファイル」。**壺は後から何個でも作れる。**
 
+## 通知（Web Push）
+
+「新しいお題が出た」「結果が発表された」の2つだけ、Web Push で知らせる。
+種類を増やすほど鬱陶しくなるので、まずこの2つに絞ってある。
+
+- 購読はホーム画面の地味なボタン1つから、タップした人だけ。ロード時に許可ダイアログを
+  勝手に出すことはしない（ブラウザの許可ダイアログはユーザー操作の直接の結果としてしか出せない）。
+- 通知をタップして開いた先は、素の Server Component のページ遷移そのもの。
+  ポップアップやモーダルで塞ぐものは何もない（`public/sw.js` の `notificationclick` 参照）。
+- 送信先の引き当ては `push_targets_for_new_odai()` / `push_targets_for_closed_odai()`
+  （`supabase/migrations/0016_push_notifications.sql`）。closed への遷移は複数の経路
+  （自動締め切り・採点完了・出題者の手動締め切り）から起こりうるため、
+  `claim_newly_closed_odai()` で「まだ通知していない closed」を1回だけ拾って二重送信を防ぐ。
+- VAPID 鍵が未設定なら通知機能だけが黙って無効になる（環境変数の節を参照）。
+
 ## 作っていないもの（意図的にスコープ外）
 
-通知（メール / Push / LINE）、ランキング・戦績ページ・プロフィール画像、コメント・いいね・リアクション、
+メール通知・LINE 連携、ランキング・戦績ページ・プロフィール画像、コメント・いいね・リアクション、
 パスワードリセット、メール認証、管理画面、AI 参加者、報酬モデル、学習パイプライン、スマホアプリ。
 
 AI を MVP に入れていないのは、(1) 教師データがまだ無いのに AI に書かせるのは順序が逆、
