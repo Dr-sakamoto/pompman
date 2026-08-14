@@ -334,3 +334,36 @@ export async function upsertMember(
   revalidatePath("/invites");
   return { done: true, created: json.created ?? false, email };
 }
+
+/**
+ * 管理者がメンバーの本名メモを登録・更新・削除する。
+ * 閲覧・書き込みとも DB 側の RLS で管理者以外を弾く。
+ */
+export async function setMemberRealName(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = String(formData.get("user_id") ?? "");
+  const realName = String(formData.get("real_name") ?? "").trim();
+
+  await requireAdmin();
+  const supabase = await createClient();
+
+  if (!realName) {
+    const { error } = await supabase.from("member_real_names").delete().eq("user_id", userId);
+    if (error) return { error: error.message };
+    revalidatePath("/members");
+    return {};
+  }
+
+  if (realName.length > 40) return { error: "本名は40文字以内にしてください" };
+
+  const { error } = await supabase
+    .from("member_real_names")
+    .upsert({ user_id: userId, real_name: realName, updated_at: new Date().toISOString() });
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/members");
+  return {};
+}

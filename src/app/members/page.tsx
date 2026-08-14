@@ -2,11 +2,13 @@ import Link from "next/link";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { Panel } from "@/components/ui";
+import { RealNameEditor } from "@/components/RealNameEditor";
 import type { AppUser } from "@/lib/types";
 
 export default async function MembersPage() {
   const { user } = await requireMember();
   const supabase = await createClient();
+  const isAdmin = user.role === "admin";
 
   const { data: userRows } = await supabase
     .from("users")
@@ -14,6 +16,17 @@ export default async function MembersPage() {
     .order("created_at", { ascending: true });
 
   const members = (userRows ?? []) as Pick<AppUser, "id" | "handle" | "created_at">[];
+
+  // 本名メモは管理者にしか見えない（RLS でも強制済み。ここは無駄な問い合わせを省くだけ）。
+  const realNameByUserId = new Map<string, string>();
+  if (isAdmin) {
+    const { data: realNameRows } = await supabase
+      .from("member_real_names")
+      .select("user_id, real_name");
+    for (const row of realNameRows ?? []) {
+      realNameByUserId.set(row.user_id, row.real_name);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -30,7 +43,12 @@ export default async function MembersPage() {
       <Panel className="divide-y divide-line p-0">
         {members.map((m) => (
           <div key={m.id} className="flex items-center justify-between px-4 py-3">
-            <span className="font-medium">{m.handle}</span>
+            <span className="flex items-center gap-2">
+              <span className="font-medium">{m.handle}</span>
+              {isAdmin && (
+                <RealNameEditor userId={m.id} realName={realNameByUserId.get(m.id) ?? null} />
+              )}
+            </span>
             <span className="text-xs text-muted">
               {new Date(m.created_at).toLocaleDateString("ja-JP")} 参加
             </span>
