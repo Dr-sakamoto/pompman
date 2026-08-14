@@ -14,7 +14,15 @@ import {
 } from "@/app/actions";
 import { ErrorText, Panel } from "@/components/ui";
 import { seededOrder } from "@/lib/scoring";
-import { MAX_ANSWERS_PER_ODAI, MAX_PICKS, type AnswerView, type Odai, type Pick } from "@/lib/types";
+import {
+  AUTO_CLOSE_AGE_DAYS,
+  AUTO_UNLOCK_IDLE_HOURS,
+  MAX_ANSWERS_PER_ODAI,
+  MAX_PICKS,
+  type AnswerView,
+  type Odai,
+  type Pick,
+} from "@/lib/types";
 
 const RANK_LABEL = ["1位", "2位", "3位"];
 
@@ -256,6 +264,13 @@ function UnlockPanel({
         <strong className="text-white">解禁すると、このお題にはもう回答を追加できません</strong>
         （片道切符）。
       </p>
+      <p className="text-sm text-muted">
+        押し忘れても止まらないように、
+        <strong className="text-white">
+          最後に書いてから{AUTO_UNLOCK_IDLE_HOURS}時間経つと自動で解禁されます
+        </strong>
+        。まだ書き足すつもりなら、それまでに書いてください。
+      </p>
       <form
         action={action}
         onSubmit={(e) => {
@@ -406,7 +421,8 @@ function CloseOdaiButton({ odaiId }: { odaiId: number }) {
       </button>
       <p className="text-xs text-muted">
         出題者だけが操作できます。発表すると回答も採点も締め切られ、誰が何を書いて
-        誰を選んだかが全員に公開されます。
+        誰を選んだかが全員に公開されます。押さなくても、回答した人が全員採点し終えるか、
+        お題を出してから{AUTO_CLOSE_AGE_DAYS}日経てば自動で発表されます。
       </p>
       <ErrorText message={state.error} />
     </form>

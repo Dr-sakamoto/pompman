@@ -15,6 +15,17 @@ export default async function HomePage() {
    * requireMember() と一覧系のクエリは互いの結果に依存していないので、
    * 直列に待たず同時に投げる。
    */
+  /*
+   * 自動解禁・自動締め切りのうち「時間が経った」で決まるぶんは、DB 側に引き金に
+   * なるイベントが無い（誰かが INSERT するとは限らない）ので、表示のたびに掃除する。
+   *
+   * 下のクエリと同時に投げると掃除の結果が今回の描画に間に合わず、解禁されたのに
+   * 伏せられたままの画面を1回見せてしまう。ここは1往復ぶん先に待つ。Supabase も
+   * Vercel も東京にあるのでこの往復は数ミリ秒で、README が問題にしている
+   * 「端末 ↔ サーバー」の往復とは桁が違う。
+   */
+  await supabase.rpc("sweep_odai_deadlines");
+
   const [
     { user },
     { data: odaiRows },
