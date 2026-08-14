@@ -137,6 +137,27 @@ npm run dev
 
 Vercel にデプロイする場合は、同じ環境変数（`NEXT_PUBLIC_SITE_URL` は本番ドメイン）を登録する。
 
+## バックアップ（無料プランなので自前で退避する）
+
+Supabase の無料プランには、ダウンロードできる自動バックアップも PITR（Point-in-Time Recovery）も無い。
+7日間アクセスが少ないとプロジェクトごと一時停止し（90日以内なら復帰可）、削除すればバックアップごと
+即座に消える。公式ドキュメントも無料プランには「CLI の `db dump` で定期的に自分でエクスポートし、
+外部に保管すること」を勧めている。このサイトの本質は教師データなので、これは他の何より優先する。
+
+```bash
+SUPABASE_DB_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres" npm run backup
+```
+
+接続文字列は **Supabase Dashboard > Project Settings > Database > Connection string (URI)** からコピーする。
+`backups/` に `pompman-<日時>.sql.gz` として溜まる（`.gitignore` 済み。招待コードや `handle` などの
+個人情報を含むので、**リポジトリには絶対にコミットしない**）。出力先はマシンのローカルにすぎないので、
+定期的に手元やクラウドストレージなど Supabase 以外の場所へコピーしておくこと。
+
+対象は `public` スキーマ（`users` / `odai` / `answers` / `picks` / `answer_unlocks` / `invite_codes` /
+`member_real_names`）のみで、これが減点法・選好ペアの元になる本体。`auth` スキーマ（ログイン用の
+認証情報）は含めていない。ムンバイ→東京のリージョン移行のように `auth.users` ごと丸ごと復元したい
+場合は、`scripts/backup-db.sh` の `--schema=public` に `--schema=auth` を足して実行する。
+
 ## RLS の検証
 
 「結果発表まで誰が書いたか・誰を選んだかが分からない」は UX の都合ではなくデータ品質の要件なので、
