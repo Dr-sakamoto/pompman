@@ -91,7 +91,12 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       )}
 
       {odai.phase === "closed" && (
-        <ClosedPhase answers={answers} picks={picks} handles={Object.fromEntries(handles)} />
+        <ClosedPhase
+          answers={answers}
+          picks={picks}
+          handles={Object.fromEntries(handles)}
+          currentUserId={user.id}
+        />
       )}
     </div>
   );
