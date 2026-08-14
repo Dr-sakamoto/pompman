@@ -258,8 +258,8 @@ ok   "掃除を回せる" $ALICE "select sweep_odai_deadlines();"
 root_eq "書いた直後は解禁されない" "0" "select count(*) from answer_unlocks where odai_id=$O_AUTO;"
 eq   "他人の回答もまだ見えない" "1" $ALICE "select count(*) from answers_view where odai_id=$O_AUTO;"
 
-# alice と bob の回答だけを 25 時間前にずらす（しきい値は 24 時間）。
-$PSQL -c "update answers set created_at = now() - interval '25 hours' where odai_id=$O_AUTO;" > /dev/null
+# alice と bob の回答だけを 13 時間前にずらす（しきい値は 12 時間）。
+$PSQL -c "update answers set created_at = now() - interval '13 hours' where odai_id=$O_AUTO;" > /dev/null
 ok   "掃除を回す（しきい値超え）" $ALICE "select sweep_odai_deadlines();"
 root_eq "回答した2人が自動で解禁される" "2" "select count(*) from answer_unlocks where odai_id=$O_AUTO;"
 eq   "未回答の carol は解禁されない" "0" $CAROL \
@@ -283,8 +283,8 @@ eq   "未解禁の参加者が残っていれば締まらない" "open" $ALICE "
 ok   "carol が解禁して採点" $CAROL "select unlock_answers($O_AUTO); select submit_picks($O_AUTO, array[$AU_A]::bigint[]);"
 eq   "猶予中はまだ締まらない" "open" $ALICE "select phase from odai where id=$O_AUTO;"
 
-# お題そのものを 25 時間前に作られたことにして猶予を明けさせる。
-$PSQL -c "update odai set created_at = now() - interval '25 hours' where id=$O_AUTO;" > /dev/null
+# お題そのものを 13 時間前に作られたことにして猶予を明けさせる。
+$PSQL -c "update odai set created_at = now() - interval '13 hours' where id=$O_AUTO;" > /dev/null
 ok   "掃除を回す（猶予明け）" $ALICE "select sweep_odai_deadlines();"
 eq   "参加者が全員やり切ったので自動で発表される" "closed" $ALICE "select phase from odai where id=$O_AUTO;"
 eq   "closed_at が入る" "t" $ALICE "select closed_at is not null from odai where id=$O_AUTO;"
@@ -297,11 +297,11 @@ ok   "dave が寿命テスト用のお題を作る" $DAVE "insert into odai(auth
 O_AGE=$($PSQL -c "select max(id) from odai;")
 ok   "erin だけが回答" $ERIN "insert into answers(odai_id,author_id,text) values ($O_AGE,'$ERIN','erin だけの回答');"
 
-$PSQL -c "update odai set created_at = now() - interval '25 hours' where id=$O_AGE;" > /dev/null
+$PSQL -c "update odai set created_at = now() - interval '13 hours' where id=$O_AGE;" > /dev/null
 ok   "掃除を回す（猶予明け・参加者1人）" $DAVE "select sweep_odai_deadlines();"
 eq   "参加者が1人だけなら「全員やり切った」では締まらない" "open" $DAVE "select phase from odai where id=$O_AGE;"
 
-$PSQL -c "update odai set created_at = now() - interval '6 days' where id=$O_AGE;" > /dev/null
+$PSQL -c "update odai set created_at = now() - interval '4 days' where id=$O_AGE;" > /dev/null
 ok   "掃除を回す（寿命超え）" $DAVE "select sweep_odai_deadlines();"
 eq   "寿命が来たら参加者1人でも発表される" "closed" $DAVE "select phase from odai where id=$O_AGE;"
 
