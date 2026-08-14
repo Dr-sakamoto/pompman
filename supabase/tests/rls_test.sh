@@ -316,6 +316,24 @@ root_eq "自動解禁を挟んでも解禁後に書かれた回答は0件" "0" \
         "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
 
 echo
+echo "== 本名メモ（管理者専用） =="
+$PSQL -v ON_ERROR_STOP=1 -c "update public.users set role='admin' where id='$ALICE';" > /dev/null
+
+deny "member は本名を登録できない"                 $BOB   "insert into member_real_names(user_id, real_name) values ('$BOB','ボブ本名');"
+ok   "admin は本名を登録できる"                    $ALICE "insert into member_real_names(user_id, real_name) values ('$BOB','ボブ本名');"
+eq   "admin には本名が見える"                      "ボブ本名" $ALICE "select real_name from member_real_names where user_id='$BOB';"
+eq   "member には本名が1件も見えない（SELECT自体は通るがRLSで0件）" "0" $BOB "select count(*) from member_real_names;"
+as $BOB "update member_real_names set real_name='改ざん' where user_id='$BOB';" > /dev/null
+root_eq "member の更新はRLSに阻まれ反映されない" "ボブ本名" "select real_name from member_real_names where user_id='$BOB';"
+ok   "admin は本名を更新できる"                    $ALICE "update member_real_names set real_name='ボブ改名' where user_id='$BOB';"
+as $BOB "delete from member_real_names where user_id='$BOB';" > /dev/null
+root_eq "member の削除はRLSに阻まれ反映されない" "1" "select count(*) from member_real_names where user_id='$BOB';"
+ok   "admin は本名を削除できる"                    $ALICE "delete from member_real_names where user_id='$BOB';"
+root_eq "削除された" "0" "select count(*) from member_real_names where user_id='$BOB';"
+
+$PSQL -v ON_ERROR_STOP=1 -c "update public.users set role='member' where id='$ALICE';" > /dev/null
+
+echo
 echo "== 仕様書 §8 の導出クエリ =="
 
 echo "(A) 選好ペア（先頭5件）:"
