@@ -17,6 +17,15 @@ export const AUTO_UNLOCK_IDLE_HOURS = 12;
  */
 export const AUTO_CLOSE_AGE_DAYS = 3;
 
+/**
+ * 「参加者が全員やり切った」で締め切るのに要る最低参加者数
+ * （DB 側の private.maybe_close_odai() と必ず揃えること）。
+ *
+ * 1人しか書いていないお題をこれで閉じると、他の人が回答する前に発表されてしまう。
+ * 選好ペアも作れない（自分の回答は選べないので、参加者1人では採点が成立しない）。
+ */
+export const AUTO_CLOSE_MIN_PARTICIPANTS = 2;
+
 export type AppUser = {
   id: string;
   handle: string;
@@ -56,6 +65,27 @@ export type Pick = {
   answer_id: number;
   rank: number;
   created_at: string;
+};
+
+/**
+ * odai_close_progress() の行。open のお題1件ぶんの「結果発表までの進捗」。
+ *
+ * 中身は全部集計値で、誰が何を書いたか・誰が誰を選んだかは含まない
+ * （0014 の header 参照）。時刻は DB 側の now() を基準に揃えてあるので、
+ * 比率はこの行の中だけで計算できる。
+ */
+export type CloseProgressRow = {
+  odai_id: number;
+  created_at: string;
+  as_of: string;
+  ready_at: string;
+  close_at: string;
+  answer_count: number;
+  participants: number;
+  unlocked: number;
+  scored: number;
+  finished: number;
+  preference_pairs: number;
 };
 
 export const PHASE_LABEL: Record<Phase, string> = {

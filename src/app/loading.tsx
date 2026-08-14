@@ -25,6 +25,9 @@ export default function Loading() {
                 <Skeleton className="ml-auto h-4 w-14" />
               </div>
               <Skeleton className="h-5 w-3/4" />
+              {/* 結果発表までの進捗バー（人数・時間）の2本ぶん */}
+              <Skeleton className="mt-3 h-1 w-full rounded-full" />
+              <Skeleton className="mt-2 h-1 w-full rounded-full" />
             </li>
           ))}
         </ul>

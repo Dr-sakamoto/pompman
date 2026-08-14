@@ -334,6 +334,78 @@ root_eq "削除された" "0" "select count(*) from member_real_names where user
 $PSQL -v ON_ERROR_STOP=1 -c "update public.users set role='member' where id='$ALICE';" > /dev/null
 
 echo
+echo "== 結果発表までの進捗（odai_close_progress） =="
+# 画面の2本のバーはこの関数の返り値をそのまま比率にしているだけなので、
+# ここが自動締め切りの判定（maybe_close_odai）と同じ数え方をしていることが要。
+# ズレると「満タンなのに発表されない」「空なのに発表された」が起きる。
+
+ok   "dave が進捗テスト用のお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','進捗テスト用');"
+O_PROG=$($PSQL -c "select max(id) from odai;")
+
+eq   "回答0件では参加者0人" "0" $DAVE "select participants from odai_close_progress() where odai_id=$O_PROG;"
+eq   "しきい値どおりの期限が返る（12時間 / 3日）" "t" $DAVE \
+     "select ready_at = created_at + interval '12 hours' and close_at = created_at + interval '3 days'
+      from odai_close_progress() where odai_id=$O_PROG;"
+
+ok   "alice が2つ回答"  $ALICE \
+     "insert into answers(odai_id,author_id,text) values ($O_PROG,'$ALICE','A1'),($O_PROG,'$ALICE','A2');"
+ok   "bob が2つ回答"    $BOB \
+     "insert into answers(odai_id,author_id,text) values ($O_PROG,'$BOB','B1'),($O_PROG,'$BOB','B2');"
+
+eq   "参加者は回答数ではなく人数（回答4件・参加者2人）" "4 2" $ALICE \
+     "select answer_count || ' ' || participants from odai_close_progress() where odai_id=$O_PROG;"
+eq   "未回答の carol にも進捗が見える（集計値なので）" "2" $CAROL \
+     "select participants from odai_close_progress() where odai_id=$O_PROG;"
+eq   "誰も解禁していなければ 0/0/0" "0 0 0" $ALICE \
+     "select unlocked || ' ' || scored || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+
+PA=$($PSQL -c "select id from answers where odai_id=$O_PROG and author_id='$ALICE' order by id limit 1;")
+PB=$($PSQL -c "select id from answers where odai_id=$O_PROG and author_id='$BOB' order by id limit 1;")
+
+ok   "alice が解禁する" $ALICE "select unlock_answers($O_PROG);"
+eq   "解禁しただけでは finished に入らない（採点が残っている）" "1 0 0" $ALICE \
+     "select unlocked || ' ' || scored || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+ok   "alice が採点する" $ALICE "select submit_picks($O_PROG, array[$PB]::bigint[]);"
+eq   "解禁して採点した人は finished に入る" "1 1 1" $ALICE \
+     "select unlocked || ' ' || scored || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+
+ok   "bob が解禁して採点する" $BOB \
+     "select unlock_answers($O_PROG); select submit_picks($O_PROG, array[$PA]::bigint[]);"
+eq   "参加者全員が finished" "2 2 2" $BOB \
+     "select unlocked || ' ' || scored || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+eq   "猶予中なので、満タンでもまだ open" "open" $BOB "select phase from odai where id=$O_PROG;"
+
+# 表示している「選好ペア」が、仕様書 §8 (A) が実際に返す行数と一致していること。
+# ここがズレると、発表を待つかどうかの判断材料が嘘になる。
+PROG_PAIRS=$($PSQL -c \
+  "select count(*) from picks p
+   join answers a_rej
+     on a_rej.odai_id = p.odai_id
+    and a_rej.id <> p.answer_id
+    and a_rej.author_id <> p.voter_id
+    and a_rej.id not in (select answer_id from picks where odai_id=p.odai_id and voter_id=p.voter_id)
+   where p.odai_id=$O_PROG;")
+eq   "選好ペアの数が §8 (A) の行数と一致する" "$PROG_PAIRS" $ALICE \
+     "select preference_pairs from odai_close_progress() where odai_id=$O_PROG;"
+
+# 猶予が明ければ、満タンのバーどおりに発表される（表示と実挙動が同じ条件で動く）。
+$PSQL -c "update odai set created_at = now() - interval '13 hours' where id=$O_PROG;" > /dev/null
+ok   "掃除を回す（猶予明け）" $ALICE "select sweep_odai_deadlines();"
+eq   "人数バーが満タンなら猶予明けに発表される" "closed" $ALICE "select phase from odai where id=$O_PROG;"
+eq   "発表済みのお題は進捗に出てこない" "0" $ALICE \
+     "select count(*) from odai_close_progress() where odai_id=$O_PROG;"
+
+# 参加者1人のお題は「全員やり切った」では閉じない（maybe_close_odai と同じ扱い）。
+# 人数バーの分母を max(参加者, 2) にしてあるのはこのため。
+ok   "erin が1人だけのお題を作る" $ERIN "insert into odai(author_id,text) values ('$ERIN','1人だけのお題');"
+O_SOLO=$($PSQL -c "select max(id) from odai;")
+ok   "erin が回答"   $ERIN "insert into answers(odai_id,author_id,text) values ($O_SOLO,'$ERIN','erin だけ');"
+ok   "erin が解禁"   $ERIN "select unlock_answers($O_SOLO);"
+eq   "採点できない人は解禁だけで finished（分子は1）" "1" $ERIN \
+     "select finished from odai_close_progress() where odai_id=$O_SOLO;"
+eq   "それでも参加者は1人なので発表されない" "open" $ERIN "select phase from odai where id=$O_SOLO;"
+
+echo
 echo "== 仕様書 §8 の導出クエリ =="
 
 echo "(A) 選好ペア（先頭5件）:"
