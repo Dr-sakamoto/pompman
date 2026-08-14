@@ -22,6 +22,9 @@
 UI の完成度は妥協していいが、DB に残る情報の解像度は妥協しない。
 仕様の全文は [`docs/odai-mvp-spec.md`](docs/odai-mvp-spec.md)。
 
+大喜利の先（間・音源・照明のデータ化 → デジタル・プレ・リハーサル → ネタAI）の順路は
+[`docs/neta-ai-roadmap.md`](docs/neta-ai-roadmap.md)。構想そのものは [`docs/comedy-ai-design.md`](docs/comedy-ai-design.md)。
+
 ## 技術構成
 
 | 項目 | 選定 |
