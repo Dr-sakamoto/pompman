@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
-import type { Odai, Phase } from "@/lib/types";
+import type { CloseProgressRow, Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
+import { CloseProgressMini } from "@/components/CloseProgress";
 
 const SECTIONS: Phase[] = ["open", "closed"];
 
@@ -34,6 +35,7 @@ export default async function HomePage() {
     { data: unlockRows },
     { data: myPicks },
     { data: progressRows },
+    { data: closeRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
@@ -47,6 +49,8 @@ export default async function HomePage() {
     supabase.from("answer_unlocks").select("odai_id, user_id"),
     supabase.from("picks").select("odai_id, voter_id"),
     supabase.rpc("ai_progress_stats"),
+    // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
+    supabase.rpc("odai_close_progress"),
   ]);
 
   const odai = (odaiRows ?? []) as Odai[];
@@ -67,6 +71,9 @@ export default async function HomePage() {
     (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
   );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
+  const closeProgress = new Map(
+    ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
+  );
 
   return (
     <div className="space-y-8">
@@ -106,6 +113,7 @@ export default async function HomePage() {
                 const count = answerCount.get(o.id) ?? 0;
                 const mine = myAnswerCount.get(o.id) ?? 0;
                 const isUnlocked = unlocked.has(o.id);
+                const progress = closeProgress.get(o.id);
                 const todo =
                   o.phase !== "open"
                     ? null
@@ -134,6 +142,7 @@ export default async function HomePage() {
                         <span className="ml-auto text-xs text-muted">回答 {count}件</span>
                       </div>
                       <p className="font-medium">{o.text}</p>
+                      {progress && <CloseProgressMini progress={progress} />}
                     </Link>
                   </li>
                 );
