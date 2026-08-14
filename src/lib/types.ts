@@ -10,12 +10,12 @@ export const MAX_PICKS = 3;
  * 自動解禁までの無音時間（DB 側の private.auto_unlock_idle() と必ず揃えること）。
  * 最後の回答からこれだけ経つと「出し切った」とみなして自動で解禁される。
  */
-export const AUTO_UNLOCK_IDLE_HOURS = 24;
+export const AUTO_UNLOCK_IDLE_HOURS = 12;
 
 /**
  * 自動締め切りまでのお題の寿命（DB 側の private.auto_close_age() と必ず揃えること）。
  */
-export const AUTO_CLOSE_AGE_DAYS = 5;
+export const AUTO_CLOSE_AGE_DAYS = 3;
 
 export type AppUser = {
   id: string;

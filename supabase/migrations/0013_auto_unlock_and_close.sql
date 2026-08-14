@@ -41,15 +41,20 @@
 
 -- 「もう出し切った」とみなすまでの無音時間。この人がそのお題に最後の回答を
 -- 書いてからこれだけ経ったら、書き終えたものとして解禁する。
--- 短すぎると考え中の人を締め出す（解禁＝以後そのお題に追加できない）ので、
--- 一晩またいでも大丈夫な長さにしてある。
+--
+-- 夜に書いた人が翌朝には採点できる長さにしてある。短すぎると考え中の人を
+-- 締め出す（解禁＝以後そのお題に追加できない）が、長くすると「誰も採点しない」
+-- 状態がそのぶん続く。まだ1周も完走していない今は、回り始めるほうを優先する。
 create or replace function private.auto_unlock_idle()
-returns interval language sql immutable as $$ select interval '24 hours' $$;
+returns interval language sql immutable as $$ select interval '12 hours' $$;
 
 -- お題そのものの寿命。ここまで来たら誰が何をしていようと結果を発表する。
 -- 「全員やり切った」（§2）のほうが先に効くのが普通で、これは最後の保険。
+--
+-- 結果発表＝誰が書いたか分かる瞬間＝戻ってくる理由なので、これが起きる頻度が
+-- そのままお題の供給ペースに効く。週に何度か回る長さにしてある。
 create or replace function private.auto_close_age()
-returns interval language sql immutable as $$ select interval '5 days' $$;
+returns interval language sql immutable as $$ select interval '3 days' $$;
 
 comment on function private.auto_unlock_idle() is
   '自動解禁のしきい値。その人の最終回答からこれだけ経つと「出し切った」とみなす。';
