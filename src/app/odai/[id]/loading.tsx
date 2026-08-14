@@ -11,13 +11,9 @@ export default function Loading() {
         <Skeleton className="h-7 w-full" />
         <Skeleton className="h-7 w-2/3" />
         <Skeleton className="h-4 w-24" />
-      </div>
-
-      {/* 結果発表までの進捗（人数・時間の2本） */}
-      <div className="space-y-3 rounded-lg border border-line bg-panel p-4">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-2 w-full rounded-full" />
-        <Skeleton className="h-2 w-full rounded-full" />
+        {/* 結果発表までの進捗（人数・時間の2本） */}
+        <Skeleton className="mt-2 h-1 w-full rounded-full" />
+        <Skeleton className="mt-2 h-1 w-full rounded-full" />
       </div>
 
       <div className="space-y-2 rounded-lg border border-line bg-panel p-4">

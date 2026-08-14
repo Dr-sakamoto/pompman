@@ -90,9 +90,11 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         <p className="text-sm text-muted">
           出題: {odai.phase === "closed" ? handles.get(odai.author_id) ?? "?" : "匿名"}
         </p>
+        {/* 一覧のカードと同じ2本。お題1件について知りたいことは場所によって変わらない。 */}
+        {odai.phase === "open" && progress && (
+          <CloseProgress progress={progress} className="pt-1" />
+        )}
       </div>
-
-      {odai.phase === "open" && progress && <CloseProgress progress={progress} />}
 
       {odai.phase === "open" && (
         <OpenPhase

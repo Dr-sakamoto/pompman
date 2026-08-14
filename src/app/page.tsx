@@ -5,7 +5,7 @@ import type { CloseProgressRow, Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
-import { CloseProgressMini } from "@/components/CloseProgress";
+import { CloseProgress } from "@/components/CloseProgress";
 
 const SECTIONS: Phase[] = ["open", "closed"];
 
@@ -142,7 +142,7 @@ export default async function HomePage() {
                         <span className="ml-auto text-xs text-muted">回答 {count}件</span>
                       </div>
                       <p className="font-medium">{o.text}</p>
-                      {progress && <CloseProgressMini progress={progress} />}
+                      {progress && <CloseProgress progress={progress} className="mt-3" />}
                     </Link>
                   </li>
                 );
