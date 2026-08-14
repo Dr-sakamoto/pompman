@@ -5,13 +5,20 @@ export function ClosedPhase({
   answers,
   picks,
   handles,
+  currentUserId,
 }: {
   answers: AnswerView[];
   picks: Pick[];
   handles: Record<string, string>;
+  currentUserId: string;
 }) {
   const results = tally(answers, picks);
   const voters = new Set(picks.map((p) => p.voter_id)).size;
+
+  // 全体順位は誰にも見せない。自分の回答の順位・得点だけ、本人にだけ見せる。
+  const myResults = results
+    .map((r, i) => ({ ...r, rank: i + 1 }))
+    .filter((r) => r.answer.author_id === currentUserId);
 
   return (
     <div className="space-y-4">
@@ -19,14 +26,22 @@ export function ClosedPhase({
         回答 {answers.length}件 / 採点した人 {voters}人 ・ 1位=3点 / 2位=2点 / 3位=1点
       </p>
 
+      {myResults.length > 0 && (
+        <div className="rounded-lg border border-accent bg-accent/5 p-4">
+          <p className="mb-2 text-sm font-bold">あなたの結果</p>
+          <ul className="space-y-1 text-sm">
+            {myResults.map((r) => (
+              <li key={r.answer.id} className="text-muted">
+                {r.answer.text}: {r.rank}位 / {r.score}点
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <ul className="space-y-3">
-        {results.map(({ answer, score, picks: got }, i) => (
-          <li
-            key={answer.id}
-            className={`rounded-lg border p-4 ${
-              score > 0 && i === 0 ? "border-accent bg-accent/5" : "border-line bg-panel"
-            }`}
-          >
+        {answers.map((answer) => (
+          <li key={answer.id} className="rounded-lg border border-line bg-panel p-4">
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <span className="text-sm font-bold">
                 {handles[answer.author_id ?? ""] ?? "?"}
@@ -36,26 +51,9 @@ export function ClosedPhase({
                   </span>
                 )}
               </span>
-              <span className="shrink-0 text-sm text-muted">{score}点</span>
             </div>
 
-            <p className="mb-3 whitespace-pre-wrap">{answer.text}</p>
-
-            {got.length > 0 ? (
-              <ul className="flex flex-wrap gap-1.5">
-                {got.map((p) => (
-                  <li
-                    key={p.id}
-                    className="rounded-full border border-line px-2 py-0.5 text-xs text-muted"
-                  >
-                    {handles[p.voter_id] ?? "?"} → {p.rank}位
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              // 誰にも選ばれなかった回答も必ず出す。消さない・隠さない。
-              <p className="text-xs text-muted">誰にも選ばれませんでした</p>
-            )}
+            <p className="whitespace-pre-wrap">{answer.text}</p>
           </li>
         ))}
       </ul>
