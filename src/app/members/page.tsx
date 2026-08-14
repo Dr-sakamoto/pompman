@@ -5,7 +5,7 @@ import { Panel } from "@/components/ui";
 import type { AppUser } from "@/lib/types";
 
 export default async function MembersPage() {
-  await requireMember();
+  const { user } = await requireMember();
   const supabase = await createClient();
 
   const { data: userRows } = await supabase
@@ -37,6 +37,16 @@ export default async function MembersPage() {
           </div>
         ))}
       </Panel>
+
+      {user.role === "admin" && (
+        <p className="text-sm text-muted">
+          パスワードを忘れた人がいたら{" "}
+          <Link href="/invites" className="font-medium text-accent hover:underline">
+            招待ページ
+          </Link>{" "}
+          から再設定できます。
+        </p>
+      )}
     </div>
   );
 }
