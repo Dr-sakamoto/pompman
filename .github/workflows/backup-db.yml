@@ -1,0 +1,38 @@
+name: DBバックアップ
+
+# Supabase 無料プランには自動バックアップも PITR も無いため、
+# public スキーマを毎日 pg_dump してワークフローの成果物として保管する。
+# 実行に必要な唯一の手作業: リポジトリの Settings > Secrets and variables > Actions で
+# SUPABASE_DB_URL を登録すること（Supabase Dashboard > Project Settings > Database >
+# Connection string (URI) からコピー）。登録さえ済めばあとは完全に自動で動く。
+
+on:
+  schedule:
+    # 19:07 UTC = 04:07 JST。利用が少ない時間帯を狙って毎日実行。
+    - cron: "7 19 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pg_dump public schema
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL が未設定です。Settings > Secrets and variables > Actions で登録してください。"
+            exit 1
+          fi
+          pg_dump "$SUPABASE_DB_URL" \
+            --schema=public \
+            --no-owner \
+            --no-privileges \
+            | gzip > pompman-backup.sql.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pompman-backup-${{ github.run_id }}
+          path: pompman-backup.sql.gz
+          retention-days: 90
