@@ -22,6 +22,9 @@
 UI の完成度は妥協していいが、DB に残る情報の解像度は妥協しない。
 仕様の全文は [`docs/odai-mvp-spec.md`](docs/odai-mvp-spec.md)。
 
+大喜利の先（間・音源・照明のデータ化 → デジタル・プレ・リハーサル → ネタAI）の順路は
+[`docs/neta-ai-roadmap.md`](docs/neta-ai-roadmap.md)。構想そのものは [`docs/comedy-ai-design.md`](docs/comedy-ai-design.md)。
+
 ## 技術構成
 
 | 項目 | 選定 |
@@ -371,7 +374,7 @@ where a.created_at > u.unlocked_at;
 - 通知をタップして開いた先は、素の Server Component のページ遷移そのもの。
   ポップアップやモーダルで塞ぐものは何もない（`public/sw.js` の `notificationclick` 参照）。
 - 送信先の引き当ては `push_targets_for_new_odai()` / `push_targets_for_closed_odai()`
-  （`supabase/migrations/0016_push_notifications.sql`）。closed への遷移は複数の経路
+  （`supabase/migrations/0017_push_notifications.sql`）。closed への遷移は複数の経路
   （自動締め切り・採点完了・出題者の手動締め切り）から起こりうるため、
   `claim_newly_closed_odai()` で「まだ通知していない closed」を1回だけ拾って二重送信を防ぐ。
 - VAPID 鍵が未設定なら通知機能だけが黙って無効になる（環境変数の節を参照）。

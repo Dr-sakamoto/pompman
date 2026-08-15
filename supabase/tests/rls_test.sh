@@ -423,7 +423,7 @@ root_eq "他人の購読はRLSに阻まれ消えない" "1" "select count(*) fro
 ok   "本人は自分の購読を消せる" $BOB "delete from push_subscriptions where user_id='$BOB';"
 
 # 通知対象の引き当ては SECURITY DEFINER 越しなら他人の分も返る
-# （送信のために必要な範囲だけ。0016 参照）。
+# （送信のために必要な範囲だけ。0017 参照）。
 ok   "bob が購読を登録し直す" $BOB \
      "insert into push_subscriptions(user_id,endpoint,p256dh,auth) values ('$BOB','https://push.example/bob','p256dh-b','auth-b');"
 eq   "新規お題の通知対象に出題者以外（bob）が入る" "1" $ALICE \

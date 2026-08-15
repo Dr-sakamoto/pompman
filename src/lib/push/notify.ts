@@ -28,7 +28,7 @@ export async function notifyNewOdai(odaiId: number, authorId: string, text: stri
  * まだ通知していない結果発表を拾って知らせる。
  *
  * closed への遷移がどの経路で起きたかは呼び出し側では分からない
- * （0016 マイグレーション参照）ので、経路を問わずここを叩けば
+ * （0017 マイグレーション参照）ので、経路を問わずここを叩けば
  * 新しく閉じたぶんだけ拾える。何も無ければ何もしない。
  */
 export async function notifyNewlyClosedOdai(): Promise<void> {
