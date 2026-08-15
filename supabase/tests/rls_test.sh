@@ -406,6 +406,50 @@ eq   "採点できない人は解禁だけで finished（分子は1）" "1" $ERI
 eq   "それでも参加者は1人なので発表されない" "open" $ERIN "select phase from odai where id=$O_SOLO;"
 
 echo
+echo "== Push 通知の購読（push_subscriptions） =="
+
+ok   "alice が自分の購読を登録できる" $ALICE \
+     "insert into push_subscriptions(user_id,endpoint,p256dh,auth) values ('$ALICE','https://push.example/alice','p256dh-a','auth-a');"
+deny "bob は他人名義の購読を登録できない" $BOB \
+     "insert into push_subscriptions(user_id,endpoint,p256dh,auth) values ('$ALICE','https://push.example/spoof','p256dh-x','auth-x');"
+ok   "bob が自分の購読を登録できる" $BOB \
+     "insert into push_subscriptions(user_id,endpoint,p256dh,auth) values ('$BOB','https://push.example/bob','p256dh-b','auth-b');"
+
+eq   "本人には自分の購読が見える" "1" $ALICE "select count(*) from push_subscriptions where user_id='$ALICE';"
+eq   "他人の購読はテーブル越しには見えない" "0" $ALICE "select count(*) from push_subscriptions where user_id='$BOB';"
+
+as $BOB "delete from push_subscriptions where user_id='$ALICE';" > /dev/null
+root_eq "他人の購読はRLSに阻まれ消えない" "1" "select count(*) from push_subscriptions where user_id='$ALICE';"
+ok   "本人は自分の購読を消せる" $BOB "delete from push_subscriptions where user_id='$BOB';"
+
+# 通知対象の引き当ては SECURITY DEFINER 越しなら他人の分も返る
+# （送信のために必要な範囲だけ。0017 参照）。
+ok   "bob が購読を登録し直す" $BOB \
+     "insert into push_subscriptions(user_id,endpoint,p256dh,auth) values ('$BOB','https://push.example/bob','p256dh-b','auth-b');"
+eq   "新規お題の通知対象に出題者以外（bob）が入る" "1" $ALICE \
+     "select count(*) from push_targets_for_new_odai('$ALICE') where user_id='$BOB';"
+eq   "出題者自身は対象に入らない" "0" $ALICE \
+     "select count(*) from push_targets_for_new_odai('$ALICE') where user_id='$ALICE';"
+
+ok   "carol が結果発表通知テスト用のお題を作る" $CAROL "insert into odai(author_id,text) values ('$CAROL','通知テスト用');"
+O_NOTIFY=$($PSQL -c "select max(id) from odai;")
+ok   "bob が回答（購読あり）" $BOB "insert into answers(odai_id,author_id,text) values ($O_NOTIFY,'$BOB','ぼぶの回答');"
+ok   "erin が回答（購読なし）" $ERIN "insert into answers(odai_id,author_id,text) values ($O_NOTIFY,'$ERIN','えりんの回答');"
+eq   "結果発表の通知対象は回答者のうち購読者だけ（bob）" "1" $ALICE \
+     "select count(*) from push_targets_for_closed_odai($O_NOTIFY) where user_id='$BOB';"
+eq   "購読していない erin は対象に出てこない" "0" $ALICE \
+     "select count(*) from push_targets_for_closed_odai($O_NOTIFY) where user_id='$ERIN';"
+
+# claim_newly_closed_odai() は「まだ通知していない closed」を1回だけ拾う。
+root_eq "このお題はまだ通知済みではない" "" "select closed_notified_at from odai where id=$O_NOTIFY;"
+ok   "出題者が締め切る" $CAROL "select close_odai($O_NOTIFY);"
+eq   "締め切り直後は claim 対象に入る" "1" $ALICE \
+     "select count(*) from claim_newly_closed_odai() where id=$O_NOTIFY;"
+eq   "一度 claim したら二度と出てこない（二重送信しない）" "0" $ALICE \
+     "select count(*) from claim_newly_closed_odai() where id=$O_NOTIFY;"
+root_eq "closed_notified_at が入る" "t" "select (closed_notified_at is not null) from odai where id=$O_NOTIFY;"
+
+echo
 echo "== 仕様書 §8 の導出クエリ =="
 
 echo "(A) 選好ペア（先頭5件）:"
