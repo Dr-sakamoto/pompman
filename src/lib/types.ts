@@ -32,7 +32,11 @@ export type AppUser = {
   role: "admin" | "educator" | "member";
   terms_accepted_at: string | null;
   created_at: string;
+  handle_changed_at: string;
 };
+
+/** 表示名の変更クールダウン（DB 側の 0018 マイグレーションと必ず揃えること）。 */
+export const HANDLE_CHANGE_COOLDOWN_DAYS = 30;
 
 export type Odai = {
   id: number;

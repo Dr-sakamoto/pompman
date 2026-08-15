@@ -62,6 +62,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link href="/members" className="text-sm text-muted hover:text-white">
                   メンバー
                 </Link>
+                <Link href="/settings" className="text-sm text-muted hover:text-white">
+                  設定
+                </Link>
                 <ShareButton />
                 <form action="/logout" method="post">
                   <button type="submit" className="text-sm text-muted hover:text-white">
