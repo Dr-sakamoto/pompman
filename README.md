@@ -144,19 +144,39 @@ Supabase の無料プランには、ダウンロードできる自動バック�
 即座に消える。公式ドキュメントも無料プランには「CLI の `db dump` で定期的に自分でエクスポートし、
 外部に保管すること」を勧めている。このサイトの本質は教師データなので、これは他の何より優先する。
 
+### 自動（`.github/workflows/backup-db.yml`）
+
+毎日 19:07 UTC（04:07 JST）に GitHub Actions が `public` スキーマを `pg_dump` し、ワークフローの
+成果物として90日間保持する。**セットアップ後は一切の手作業が不要。**
+
+有効にするための一度きりの手順:
+
+1. Supabase Dashboard > Project Settings > Database > **Connection string (URI)** をコピー
+2. GitHub のこのリポジトリで **Settings > Secrets and variables > Actions > New repository secret**
+   を開き、名前 `SUPABASE_DB_URL` でその接続文字列を貼って保存
+
+これだけ。パスワードはリポジトリにもチャットにも残らず、GitHub の Secrets にだけ保存される。
+以後は何もしなくても毎日動く（Actions タブの「DBバックアップ」から手動実行も可能）。
+
+（Claude 側の定期実行（Routine）で Supabase/Drive に直接繋ぐ形も検討したが、この組織では
+ルーティン経由の MCP 接続がポリシーで塞がれているため使えなかった。GitHub Actions は
+Claude のセッションに依存せず動き続けるので、そもそもこちらのほうが壊れにくい。）
+
+### 手動（`scripts/backup-db.sh`）
+
+一回限りの退避や、`auth` スキーマも含めた完全な移行用。自動バックアップとは別に、必要なときに叩く。
+
 ```bash
 SUPABASE_DB_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres" npm run backup
 ```
 
-接続文字列は **Supabase Dashboard > Project Settings > Database > Connection string (URI)** からコピーする。
 `backups/` に `pompman-<日時>.sql.gz` として溜まる（`.gitignore` 済み。招待コードや `handle` などの
-個人情報を含むので、**リポジトリには絶対にコミットしない**）。出力先はマシンのローカルにすぎないので、
-定期的に手元やクラウドストレージなど Supabase 以外の場所へコピーしておくこと。
+個人情報を含むので、**リポジトリには絶対にコミットしない**）。
 
 対象は `public` スキーマ（`users` / `odai` / `answers` / `picks` / `answer_unlocks` / `invite_codes` /
 `member_real_names`）のみで、これが減点法・選好ペアの元になる本体。`auth` スキーマ（ログイン用の
 認証情報）は含めていない。ムンバイ→東京のリージョン移行のように `auth.users` ごと丸ごと復元したい
-場合は、`scripts/backup-db.sh` の `--schema=public` に `--schema=auth` を足して実行する。
+場合は、`--schema=public` に `--schema=auth` を足して実行する（自動側のワークフローも同様）。
 
 ## RLS の検証
 
