@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SESSION_BACKUP_COOKIE, SESSION_BACKUP_OPTIONS } from "@/lib/supabase/session-backup";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 import { requireAdmin, requireMember } from "@/lib/session";
-import { MAX_PICKS } from "@/lib/types";
+import { HANDLE_CHANGE_COOLDOWN_DAYS, MAX_PICKS } from "@/lib/types";
 import { notifyNewOdai, notifyNewlyClosedOdai } from "@/lib/push/notify";
 
 export type ActionState = { error?: string };
@@ -109,6 +109,43 @@ export async function registerHandle(
   }
 
   redirect("/");
+}
+
+/**
+ * 登録済み handle の変更。1〜20文字であることに加え、クールダウン
+ * （30日に1回まで）を守っているかは DB 側のトリガーが最終判定する
+ * （0018 参照）。ここでのチェックはユーザーへの分かりやすいエラー表示のため。
+ */
+export async function updateHandle(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const handle = String(formData.get("handle") ?? "").trim();
+  if (handle.length < 1 || handle.length > 20) {
+    return { error: "表示名は1〜20文字で入力してください" };
+  }
+
+  const { user } = await requireMember();
+
+  if (handle === user.handle) return {};
+
+  const changedAt = new Date(user.handle_changed_at).getTime();
+  const cooldownMs = HANDLE_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+  const remainingMs = changedAt + cooldownMs - Date.now();
+  if (remainingMs > 0) {
+    const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+    return { error: `表示名の変更は前回の変更からあと${remainingDays}日後にできます` };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("users").update({ handle }).eq("id", user.id);
+
+  if (error) {
+    if (error.code === "23505") return { error: "その表示名はすでに使われています" };
+    if (error.code === "P0001") return { error: "表示名の変更は前回の変更から30日経つまでできません" };
+    return { error: error.message };
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/members");
+  return {};
 }
 
 export async function createOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
