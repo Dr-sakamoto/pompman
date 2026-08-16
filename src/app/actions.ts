@@ -217,7 +217,7 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
     if (!Number.isInteger(id)) return { error: "選んだ回答が不正です" };
     ids.push(id);
   }
-  if (ids.length === 0) return { error: "1位を選んでください" };
+  // 空（0件）は「何も選ばない」の明示的な宣言として submit_picks 側に通す。
   if (new Set(ids).size !== ids.length) {
     return { error: "同じ回答を複数の順位に選ぶことはできません" };
   }

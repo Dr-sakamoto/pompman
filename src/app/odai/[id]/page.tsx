@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
-import type { AnswerView, AppUser, CloseProgressRow, Odai, Pick } from "@/lib/types";
+import type { AnswerView, AppUser, CloseProgressRow, Odai, Pick, PickSkip } from "@/lib/types";
 import { PhaseBadge } from "@/components/ui";
 import { CloseProgress } from "@/components/CloseProgress";
 import { OpenPhase } from "./OpenPhase";
@@ -37,6 +37,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     { data: odaiRow },
     { data: answerRows },
     { data: pickRows },
+    { data: pickSkipRows },
     { data: userRows },
     { data: countRows },
     { data: unlockRows },
@@ -53,6 +54,8 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       .order("created_at", { ascending: true }),
     // 結果発表前は自分の picks しか返ってこない。
     supabase.from("picks").select("*").eq("odai_id", odaiId),
+    // 「何も選ばない」で採点を終えた宣言。結果発表前は自分の分しか返ってこない。
+    supabase.from("pick_skips").select("*").eq("odai_id", odaiId),
     supabase.from("users").select("*"),
     // 件数は中身を含まないので、解禁前でも見せる。
     supabase.rpc("odai_answer_counts"),
@@ -68,6 +71,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const odai = odaiRow as Odai;
   const answers = (answerRows ?? []) as AnswerView[];
   const picks = (pickRows ?? []) as Pick[];
+  const pickSkips = (pickSkipRows ?? []) as PickSkip[];
   const handles = new Map(((userRows ?? []) as AppUser[]).map((u) => [u.id, u.handle]));
   const answerCount =
     ((countRows ?? []) as { odai_id: number; answer_count: number }[]).find(
@@ -103,6 +107,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
           answerCount={answerCount}
           unlocked={unlocked}
           myPicks={picks.filter((p) => p.voter_id === user.id)}
+          mySkipped={pickSkips.some((s) => s.voter_id === user.id)}
           voterId={user.id}
           isOwner={isOwner}
         />

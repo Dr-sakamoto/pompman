@@ -67,6 +67,13 @@ export type Pick = {
   created_at: string;
 };
 
+/** pick_skips の行。「面白い回答が無かった」という明示的な採点終了の宣言。 */
+export type PickSkip = {
+  odai_id: number;
+  voter_id: string;
+  created_at: string;
+};
+
 /**
  * odai_close_progress() の行。open のお題1件ぶんの「結果発表までの進捗」。
  *
