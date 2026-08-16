@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   closeOdai,
@@ -42,6 +42,7 @@ export function OpenPhase({
   answerCount,
   unlocked,
   myPicks,
+  mySkipped,
   voterId,
   isOwner,
 }: {
@@ -50,6 +51,7 @@ export function OpenPhase({
   answerCount: number;
   unlocked: boolean;
   myPicks: Pick[];
+  mySkipped: boolean;
   voterId: string;
   isOwner: boolean;
 }) {
@@ -82,6 +84,7 @@ export function OpenPhase({
           odaiId={odai.id}
           answers={ordered}
           myPicks={myPicks}
+          mySkipped={mySkipped}
           maxPicks={maxPicks}
           pickable={pickable}
         />
@@ -298,12 +301,14 @@ function PickForm({
   odaiId,
   answers,
   myPicks,
+  mySkipped,
   maxPicks,
   pickable,
 }: {
   odaiId: number;
   answers: AnswerView[];
   myPicks: Pick[];
+  mySkipped: boolean;
   maxPicks: number;
   pickable: number;
 }) {
@@ -314,6 +319,10 @@ function PickForm({
       .map((p) => p.answer_id),
   );
   const [state, action, pending] = useActionState<ActionState, FormData>(submitPicks, {});
+  const [skipState, skipAction, skipPending] = useActionState<ActionState, FormData>(
+    submitPicks,
+    {},
+  );
 
   function toggle(answerId: number) {
     setSelected((prev) => {
@@ -328,6 +337,15 @@ function PickForm({
   // 送信対象は選択順そのままでよい。
   const alreadyPicked = myPicks.length > 0;
 
+  const skipInitial = useRef(true);
+  useEffect(() => {
+    if (skipInitial.current) {
+      skipInitial.current = false;
+      return;
+    }
+    if (!skipPending && !skipState.error) setSelected([]);
+  }, [skipState, skipPending]);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
@@ -335,6 +353,12 @@ function PickForm({
           ? "まだ他の人の回答がありません。集まったら面白い順に選んでください。"
           : `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。回答が増えたら何度でも選び直せます。`}
       </p>
+
+      {mySkipped && selected.length === 0 && (
+        <p className="text-sm text-muted">
+          「何も選ばない」で採点を終えています。気が変わったら下から選んで送信し直せます。
+        </p>
+      )}
 
       <ul className="space-y-2">
         {answers.map((a) => {
@@ -398,6 +422,21 @@ function PickForm({
               </p>
             )}
             <ErrorText message={state.error} />
+          </form>
+
+          <form action={skipAction} className="mt-3 space-y-2 border-t border-line pt-3">
+            <input type="hidden" name="odai_id" value={odaiId} />
+            <button
+              type="submit"
+              disabled={skipPending}
+              className="w-full rounded-md border border-line px-4 py-2 text-sm hover:border-white/25 disabled:opacity-40"
+            >
+              {skipPending ? "送信中…" : "何も選ばない（採点を終える）"}
+            </button>
+            <p className="text-xs text-muted">
+              面白い回答が無かったときはこちら。採点は0件のまま終えたことになります。
+            </p>
+            <ErrorText message={skipState.error} />
           </form>
         </Panel>
       )}
