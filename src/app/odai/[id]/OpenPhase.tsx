@@ -18,6 +18,7 @@ import {
   AUTO_UNLOCK_IDLE_HOURS,
   MAX_ANSWERS_PER_ODAI,
   MAX_PICKS,
+  MIN_SCORERS_TO_CLOSE,
   type AnswerView,
   type Odai,
   type Pick,
@@ -461,7 +462,8 @@ function CloseOdaiButton({ odaiId }: { odaiId: number }) {
       <p className="text-xs text-muted">
         出題者だけが操作できます。発表すると回答も採点も締め切られ、誰が何を書いて
         誰を選んだかが全員に公開されます。押さなくても、上の2本のバーのどちらかが
-        埋まれば自動で発表されます。
+        埋まれば自動で発表されます。採点した人が{MIN_SCORERS_TO_CLOSE}人に届くまでは、
+        押しても待っても発表されません（採点0の順位表を出さないため）。
       </p>
       <ErrorText message={state.error} />
     </form>

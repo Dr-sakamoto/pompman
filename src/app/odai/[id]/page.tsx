@@ -117,6 +117,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         <ClosedPhase
           answers={answers}
           picks={picks}
+          skips={pickSkips.length}
           handles={Object.fromEntries(handles)}
           currentUserId={user.id}
         />

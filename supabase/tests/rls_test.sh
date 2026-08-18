@@ -193,6 +193,12 @@ eq   "削除された"                                  "0" $DAVE "select count(
 ok   "dave がもう1つお題を作る（closed のテスト用）" $DAVE "insert into odai(author_id,text) values ('$DAVE','締切後編集テスト用');"
 O_CLOSED=$($PSQL -c "select max(id) from odai;")
 ok   "erin が回答する"                       $ERIN  "insert into answers(odai_id,author_id,text) values ($O_CLOSED,'$ERIN','erin の回答');"
+# 締め切りには最低採点人数が要る（0019）ので、2人ぶんの採点を入れてから締め切る。
+ok   "alice も回答する"                     $ALICE "insert into answers(odai_id,author_id,text) values ($O_CLOSED,'$ALICE','alice の回答');"
+CL_E=$($PSQL -c "select id from answers where odai_id=$O_CLOSED and author_id='$ERIN' limit 1;")
+CL_A=$($PSQL -c "select id from answers where odai_id=$O_CLOSED and author_id='$ALICE' limit 1;")
+ok   "erin が解禁して採点"                  $ERIN  "select unlock_answers($O_CLOSED); select submit_picks($O_CLOSED, array[$CL_A]::bigint[]);"
+ok   "alice が解禁して採点"                 $ALICE "select unlock_answers($O_CLOSED); select submit_picks($O_CLOSED, array[$CL_E]::bigint[]);"
 ok   "出題者が締め切る"                      $DAVE  "select close_odai($O_CLOSED);"
 ok   "closed 後の出題者の UPDATE も0件に絞られる" $DAVE "update odai set text='締切後の改ざん' where id=$O_CLOSED;"
 eq   "編集されていない（closed）"                  "締切後編集テスト用" $DAVE "select text from odai where id=$O_CLOSED;"
@@ -301,9 +307,46 @@ $PSQL -c "update odai set created_at = now() - interval '13 hours' where id=$O_A
 ok   "掃除を回す（猶予明け・参加者1人）" $DAVE "select sweep_odai_deadlines();"
 eq   "参加者が1人だけなら「全員やり切った」では締まらない" "open" $DAVE "select phase from odai where id=$O_AGE;"
 
+# 寿命が来ても採点が足りなければ発表しない（0019）。ここは 0013 では
+# 「寿命が来たら参加者1人でも発表される」だった箇所。参加者1人＝自分の回答しか
+# 無い＝採点が原理的に成立しないお題で、全員0点の順位表だけが出ていた。
 $PSQL -c "update odai set created_at = now() - interval '4 days' where id=$O_AGE;" > /dev/null
-ok   "掃除を回す（寿命超え）" $DAVE "select sweep_odai_deadlines();"
-eq   "寿命が来たら参加者1人でも発表される" "closed" $DAVE "select phase from odai where id=$O_AGE;"
+ok   "掃除を回す（寿命超え・採点0人）" $DAVE "select sweep_odai_deadlines();"
+eq   "採点が足りないお題は寿命が来ても発表されない" "open" $DAVE "select phase from odai where id=$O_AGE;"
+deny "出題者が手で締め切ることもできない" $DAVE "select close_odai($O_AGE);"
+
+# 採点には他人の回答が要る（自分のは選べない）ので、2人足してから採点させる。
+ok   "alice も回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O_AGE,'$ALICE','alice の追い回答');"
+ok   "bob も回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O_AGE,'$BOB','bob の追い回答');"
+AG_E=$($PSQL -c "select id from answers where odai_id=$O_AGE and author_id='$ERIN' limit 1;")
+
+ok   "alice が解禁して採点" $ALICE \
+     "select unlock_answers($O_AGE); select submit_picks($O_AGE, array[$AG_E]::bigint[]);"
+eq   "採点1人では、寿命を過ぎていても発表されない" "open" $ALICE "select phase from odai where id=$O_AGE;"
+ok   "bob が解禁して採点" $BOB \
+     "select unlock_answers($O_AGE); select submit_picks($O_AGE, array[$AG_E]::bigint[]);"
+eq   "最低人数目の採点が入った瞬間に発表される" "closed" $BOB "select phase from odai where id=$O_AGE;"
+
+echo
+echo "-- 「選ぶ回答なし」も採点を終えた人に数える --"
+# skip は未採点ではなく採点結果（0016）。全員が「面白い回答が無かった」と
+# 宣言したお題は、票が0件でも「見た上で誰も選ばなかった」という記録になる。
+ok   "carol が skip テスト用のお題を作る" $CAROL "insert into odai(author_id,text) values ('$CAROL','skip テスト用');"
+O_SKIP=$($PSQL -c "select max(id) from odai;")
+ok   "alice 回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O_SKIP,'$ALICE','alice の回答');"
+ok   "bob 回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O_SKIP,'$BOB','bob の回答');"
+
+$PSQL -c "update odai set created_at = now() - interval '4 days' where id=$O_SKIP;" > /dev/null
+ok   "掃除を回す（寿命超え・採点0人）" $ALICE "select sweep_odai_deadlines();"
+eq   "誰も採点していなければ発表されない" "open" $ALICE "select phase from odai where id=$O_SKIP;"
+
+ok   "alice が解禁して「選ぶ回答なし」" $ALICE \
+     "select unlock_answers($O_SKIP); select submit_picks($O_SKIP, array[]::bigint[]);"
+eq   "skip 1人でも下限には届かない" "open" $ALICE "select phase from odai where id=$O_SKIP;"
+ok   "bob が解禁して「選ぶ回答なし」" $BOB \
+     "select unlock_answers($O_SKIP); select submit_picks($O_SKIP, array[]::bigint[]);"
+eq   "全員が「選ぶ回答なし」なら採点済みとして発表される" "closed" $BOB "select phase from odai where id=$O_SKIP;"
+root_eq "票は1件も入っていない" "0" "select count(*) from picks where odai_id=$O_SKIP;"
 
 ok   "erin が回答0件のお題を作る" $ERIN "insert into odai(author_id,text) values ('$ERIN','誰も回答しないお題');"
 O_EMPTY=$($PSQL -c "select max(id) from odai;")
@@ -373,6 +416,13 @@ ok   "bob が解禁して採点する" $BOB \
      "select unlock_answers($O_PROG); select submit_picks($O_PROG, array[$PA]::bigint[]);"
 eq   "参加者全員が finished" "2 2 2" $BOB \
      "select unlocked || ' ' || scored || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+
+# 発表の下限（0019）は judged で見る。表示側の judged と判定側の scorer_count が
+# ズレると、「採点待ち」と出ているのに発表される（逆も）ことになる。
+eq   "採点を終えた人数（judged）も2人" "2" $BOB \
+     "select judged from odai_close_progress() where odai_id=$O_PROG;"
+root_eq "judged が判定側の scorer_count と一致する" "t" \
+        "select (select judged from odai_close_progress() where odai_id=$O_PROG) = private.scorer_count($O_PROG);"
 eq   "猶予中なので、満タンでもまだ open" "open" $BOB "select phase from odai where id=$O_PROG;"
 
 # 表示している「選好ペア」が、仕様書 §8 (A) が実際に返す行数と一致していること。
@@ -403,6 +453,8 @@ ok   "erin が回答"   $ERIN "insert into answers(odai_id,author_id,text) value
 ok   "erin が解禁"   $ERIN "select unlock_answers($O_SOLO);"
 eq   "採点できない人は解禁だけで finished（分子は1）" "1" $ERIN \
      "select finished from odai_close_progress() where odai_id=$O_SOLO;"
+eq   "ただし採点はしていないので judged は0（時間バーは「採点待ち」になる）" "0" $ERIN \
+     "select judged from odai_close_progress() where odai_id=$O_SOLO;"
 eq   "それでも参加者は1人なので発表されない" "open" $ERIN "select phase from odai where id=$O_SOLO;"
 
 echo
@@ -442,6 +494,13 @@ eq   "購読していない erin は対象に出てこない" "0" $ALICE \
 
 # claim_newly_closed_odai() は「まだ通知していない closed」を1回だけ拾う。
 root_eq "このお題はまだ通知済みではない" "" "select closed_notified_at from odai where id=$O_NOTIFY;"
+# 締め切りには最低採点人数が要る（0019）。回答した2人に採点させてから締め切る。
+NT_B=$($PSQL -c "select id from answers where odai_id=$O_NOTIFY and author_id='$BOB' limit 1;")
+NT_E=$($PSQL -c "select id from answers where odai_id=$O_NOTIFY and author_id='$ERIN' limit 1;")
+ok   "bob が解禁して採点" $BOB \
+     "select unlock_answers($O_NOTIFY); select submit_picks($O_NOTIFY, array[$NT_E]::bigint[]);"
+ok   "erin が解禁して採点" $ERIN \
+     "select unlock_answers($O_NOTIFY); select submit_picks($O_NOTIFY, array[$NT_B]::bigint[]);"
 ok   "出題者が締め切る" $CAROL "select close_odai($O_NOTIFY);"
 eq   "締め切り直後は claim 対象に入る" "1" $ALICE \
      "select count(*) from claim_newly_closed_odai() where id=$O_NOTIFY;"
