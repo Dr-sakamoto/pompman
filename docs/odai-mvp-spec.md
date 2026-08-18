@@ -316,12 +316,13 @@ DB層の保証ではない。API を直接叩けば見える点は `answers`/`pi
 
 ### 5.4 貢献度ランキング（`/ranking`）と連続日数ストリーク
 
-習慣化を促すために追加。実装は [`0016_contribution_ranking_and_streak.sql`](../supabase/migrations/0016_contribution_ranking_and_streak.sql) を参照。
+習慣化を促すために追加。実装は [`0016_contribution_ranking_and_streak.sql`](../supabase/migrations/0016_contribution_ranking_and_streak.sql)
+（および拡張の [`0019_ranking_include_open_and_picks.sql`](../supabase/migrations/0019_ranking_include_open_and_picks.sql)）を参照。
 
-- ランキングは**結果発表済み(closed)のお題だけ**を集計対象にする。openのお題の中身（誰が
-  何を書いたか）には触れない —— §4.3 の匿名性設計（他人の回答が見えると引きずられる／
-  誰が書いたかが見えると人気投票化する）と衝突しないための線引き
-- 指標はハンドルネーム別の投稿数（回答数・お題数の合計）。ハンドルは `users_select_all` で
+- ランキングはフェーズを問わず（結果発表前のopenのお題も含めて）集計対象にする。集計するのは
+  あくまで件数であり、お題の中身（誰が何を書いたか）自体には触れないため、§4.3 の匿名性設計
+  （他人の回答が見えると引きずられる／誰が書いたかが見えると人気投票化する）とは衝突しない
+- 指標はハンドルネーム別の投稿数（回答数・お題数・採点数の合計）。ハンドルは `users_select_all` で
   元々全員に公開されているため、新たな非公開情報の開示にはならない
 - 連続日数ストリークは「回答 or 採点のどちらかを行った日（JST暦日）」が何日連続しているかを
   本人にだけ表示する。最後の参加日が今日か昨日でなければ0日として見せる（途切れたら再開しやすいよう、

@@ -105,14 +105,15 @@ export const PHASE_LABEL: Record<Phase, string> = {
 };
 
 /**
- * contribution_ranking() の行。結果発表済み(closed)のお題だけを対象にした
- * 投稿数（回答数・お題数）。open のお題の中身（誰が何を書いたか）は含まない。
+ * contribution_ranking() の行。投稿数（回答数・お題数・採点数）。
+ * 結果発表前(open)のお題への投稿・採点も含む。お題の中身（誰が何を書いたか）は含まない。
  */
 export type ContributionRankingRow = {
   user_id: string;
   handle: string;
   answer_count: number;
   odai_count: number;
+  pick_count: number;
 };
 
 /**
