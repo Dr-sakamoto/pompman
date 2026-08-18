@@ -84,8 +84,6 @@ echo
 echo "-- 回答するだけでは他人の回答は見えない・解禁も採点もできない --"
 eq   "未回答の carol には1件も見えない"            "0" $CAROL "select count(*) from answers_view where odai_id=1;"
 eq   "未回答でも回答数だけは分かる"                "3" $CAROL "select answer_count from odai_answer_counts() where odai_id=1;"
-deny "回答していないと解禁できない"          $CAROL "select unlock_answers(1);"
-deny "回答していないと解禁ログも直接は作れない" $CAROL "insert into answer_unlocks(odai_id,user_id) values (1,'$CAROL');"
 eq   "回答しただけでは他人の回答は見えない(bob)"   "2" $BOB "select count(*) from answers_view where odai_id=1;"
 deny "解禁前は採点できない(bob)"             $BOB   "select submit_picks(1, array[$A1]::bigint[]);"
 deny "解禁前は picks を直接入れられない(bob)" $BOB  "insert into picks(odai_id,voter_id,answer_id,rank) values (1,'$BOB',$A1,1);"
@@ -248,6 +246,23 @@ eq   "結果発表後は6件すべて見える（0票の回答も消えない）
 
 root_eq "解禁後に書かれた回答は1件も無い（全お題ぶん）" "0" \
         "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
+
+echo
+echo "== 回答を書いていなくても解禁して採点だけできる（0020） =="
+ok   "dave がお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','採点だけ参加テスト用');"
+O4=$($PSQL -c "select max(id) from odai;")
+ok   "alice 回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O4,'$ALICE','A の回答');"
+ok   "bob 回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O4,'$BOB','B の回答');"
+aid4() { $PSQL -c "select id from answers where odai_id=$O4 and author_id='$1' order by id limit 1;"; }
+A4=$(aid4 $ALICE); B4=$(aid4 $BOB)
+
+eq   "carol は未回答（自分の回答が0件）" "0" $CAROL "select count(*) from answers_view where odai_id=$O4 and is_mine;"
+ok   "回答していない carol でも解禁できる" $CAROL "select unlock_answers($O4);"
+eq   "解禁すれば全部見える(carol)" "2" $CAROL "select count(*) from answers_view where odai_id=$O4;"
+ok   "回答していない carol でも採点できる" $CAROL "select submit_picks($O4, array[$A4,$B4]::bigint[]);"
+deny "二重に解禁できない(carol)" $CAROL "select unlock_answers($O4);"
+deny "解禁後は carol も回答を追加できない" $CAROL \
+     "insert into answers(odai_id,author_id,text) values ($O4,'$CAROL','解禁後の回答');"
 
 echo
 echo "== 自動解禁と自動締め切り =="
