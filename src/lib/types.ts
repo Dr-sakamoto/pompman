@@ -26,6 +26,16 @@ export const AUTO_CLOSE_AGE_DAYS = 3;
  */
 export const AUTO_CLOSE_MIN_PARTICIPANTS = 2;
 
+/**
+ * 結果発表に要る最低採点人数（DB 側の private.min_scorers() と必ず揃えること）。
+ *
+ * これを下回るお題は、寿命（AUTO_CLOSE_AGE_DAYS）が来ても出題者が締め切っても
+ * 発表されない。採点0のまま発表すると、全員0点の順位表が出て選好ペアも1組も
+ * 取れないのに、匿名だけが解除される —— 一度しか切れない札を空振りで使うことになる。
+ * 「採点した人」には「選ぶ回答なし」で終えた人も含む（0019）。
+ */
+export const MIN_SCORERS_TO_CLOSE = 2;
+
 export type AppUser = {
   id: string;
   handle: string;
@@ -95,6 +105,8 @@ export type CloseProgressRow = {
   participants: number;
   unlocked: number;
   scored: number;
+  /** 採点を終えた人数（scored ＋「選ぶ回答なし」で終えた人）。発表の下限はこの数で見る。 */
+  judged: number;
   finished: number;
   preference_pairs: number;
 };

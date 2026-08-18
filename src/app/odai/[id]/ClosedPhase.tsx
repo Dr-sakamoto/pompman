@@ -4,11 +4,13 @@ import type { AnswerView, Pick } from "@/lib/types";
 export function ClosedPhase({
   answers,
   picks,
+  skips,
   handles,
   currentUserId,
 }: {
   answers: AnswerView[];
   picks: Pick[];
+  skips: number;
   handles: Record<string, string>;
   currentUserId: string;
 }) {
@@ -23,8 +25,14 @@ export function ClosedPhase({
 
   return (
     <div className="space-y-4">
+      {/*
+        「選ぶ回答なし」で終えた人も採点を終えた人（0016）。0票が並ぶ結果のとき、
+        それが「誰も見ていない」のか「見た上で誰も選ばなかった」のかで意味が
+        まるで違うので、人数を分けて出す。
+      */}
       <p className="text-sm text-muted">
-        回答 {answers.length}件 / 採点した人 {voters}人 ・ 1位=3点 / 2位=2点 / 3位=1点
+        回答 {answers.length}件 / 採点した人 {voters}人
+        {skips > 0 && `（ほかに「選ぶ回答なし」${skips}人）`} ・ 1位=3点 / 2位=2点 / 3位=1点
       </p>
 
       {top3.length > 0 && (

@@ -1,6 +1,7 @@
 import {
   AUTO_CLOSE_MIN_PARTICIPANTS,
   AUTO_UNLOCK_IDLE_HOURS,
+  MIN_SCORERS_TO_CLOSE,
   type CloseProgressRow,
 } from "@/lib/types";
 
@@ -14,6 +15,10 @@ import {
  *
  *   人数 —— やり切った参加者 / max(参加者, 2)。自分と他の参加者が動かせる棒
  *   時間 —— 作成からの経過 / 3日。放っておいても勝手に進む棒
+ *
+ * ただし時間の棒は右端まで行っても発表されないことがある（回答0件、または
+ * 採点した人が足りない。0019）。そのときは残り時間ではなく、待っている相手
+ * （「回答待ち」「採点待ち」）を出す。棒だけ満タンで何も起きない状態を作らない。
  *
  * 出すのは棒と値だけ。見出しも説明文も置かない —— バーは一目で見るもので、
  * 横に文章があると読む対象に化け、そのぶん読み飛ばされる。ラベル（人数 / 時間）
@@ -54,6 +59,7 @@ function derive(row: CloseProgressRow): { people: Track; time: Track } {
   const answers = Number(row.answer_count);
   const participants = Number(row.participants);
   const finished = Number(row.finished);
+  const judged = Number(row.judged);
 
   const createdAt = Date.parse(row.created_at);
   const asOf = Date.parse(row.as_of);
@@ -61,6 +67,12 @@ function derive(row: CloseProgressRow): { people: Track; time: Track } {
 
   const hasAnswers = answers > 0;
   const timeLeft = closeAt - asOf;
+
+  /*
+   * 寿命が来ても発表されない条件（0019）。採点した人がここに届くまでは、
+   * 時間の棒が満タンでも closed にならない。
+   */
+  const enoughJudges = judged >= MIN_SCORERS_TO_CLOSE;
 
   /*
    * 人数バーの分母は「参加者」ではなく「参加者と最低人数の大きいほう」。
@@ -73,7 +85,13 @@ function derive(row: CloseProgressRow): { people: Track; time: Track } {
    * 残りが自動解禁のしきい値を切ったら色で急かす。ここを過ぎると、いま書いた回答は
    * 自動解禁が間に合わない＝自分で解禁しないと採点できないまま発表される。
    */
-  const urgent = hasAnswers && timeLeft <= AUTO_UNLOCK_IDLE_HOURS * HOUR;
+  const urgent = hasAnswers && enoughJudges && timeLeft <= AUTO_UNLOCK_IDLE_HOURS * HOUR;
+
+  /*
+   * 期限が来たのに採点が足りない状態。ここだけは時間で解けず、誰かが採点した
+   * 瞬間に発表される（0019）。放っておいても進まない唯一の棒なので色で拾わせる。
+   */
+  const waitingForScore = hasAnswers && !enoughJudges && timeLeft <= 0;
 
   return {
     people: {
@@ -82,10 +100,16 @@ function derive(row: CloseProgressRow): { people: Track; time: Track } {
       tone: "accent",
     },
     time: {
-      // 回答が0件のお題は寿命が来ても発表されないので、残り時間を出すと嘘になる。
-      value: !hasAnswers ? "回答待ち" : timeLeft > 0 ? `あと${formatSpan(timeLeft)}` : "まもなく",
+      // 回答0件・採点不足のお題は寿命が来ても発表されないので、残り時間を出すと嘘になる。
+      value: !hasAnswers
+        ? "回答待ち"
+        : waitingForScore
+          ? "採点待ち"
+          : timeLeft > 0
+            ? `あと${formatSpan(timeLeft)}`
+            : "まもなく",
       ratio: clamp01((asOf - createdAt) / (closeAt - createdAt)),
-      tone: urgent ? "accent" : "muted",
+      tone: urgent || waitingForScore ? "accent" : "muted",
     },
   };
 }
