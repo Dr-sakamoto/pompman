@@ -15,16 +15,40 @@ export function ClosedPhase({
   const results = tally(answers, picks);
   const voters = new Set(picks.map((p) => p.voter_id)).size;
 
-  // 全体順位は誰にも見せない。自分の回答の順位・得点だけ、本人にだけ見せる。
-  const myResults = results
-    .map((r, i) => ({ ...r, rank: i + 1 }))
-    .filter((r) => r.answer.author_id === currentUserId);
+  // 全体順位はトップ3のみ発表する。自分の回答の順位・得点は本人にだけ見せる。
+  const ranked = results.map((r, i) => ({ ...r, rank: i + 1 }));
+  const top3 = ranked.slice(0, 3);
+
+  const myResults = ranked.filter((r) => r.answer.author_id === currentUserId);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
         回答 {answers.length}件 / 採点した人 {voters}人 ・ 1位=3点 / 2位=2点 / 3位=1点
       </p>
+
+      {top3.length > 0 && (
+        <div className="rounded-lg border border-line bg-panel p-4">
+          <p className="mb-2 text-sm font-bold">トップ3</p>
+          <ul className="space-y-2 text-sm">
+            {top3.map((r) => (
+              <li key={r.answer.id} className="flex items-baseline justify-between gap-3">
+                <span>
+                  <span className="mr-2 font-bold text-accent">{r.rank}位</span>
+                  {handles[r.answer.author_id ?? ""] ?? "?"}
+                  {r.answer.is_ai && (
+                    <span className="ml-2 rounded bg-white/10 px-1.5 py-0.5 text-xs font-normal text-muted">
+                      AI{r.answer.model_ver ? ` / ${r.answer.model_ver}` : ""}
+                    </span>
+                  )}
+                  ：{r.answer.text}
+                </span>
+                <span className="whitespace-nowrap text-muted">{r.score}点</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {myResults.length > 0 && (
         <div className="rounded-lg border border-accent bg-accent/5 p-4">
