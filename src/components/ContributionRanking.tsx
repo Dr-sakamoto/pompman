@@ -14,7 +14,7 @@ export function ContributionRanking({
     return (
       <Panel>
         <p className="text-sm text-muted">
-          まだ結果発表済みのお題がありません。お題が締め切られるとここに載ります。
+          まだ投稿・採点がありません。回答したりお題を出したり採点したりするとここに載ります。
         </p>
       </Panel>
     );
@@ -23,7 +23,7 @@ export function ContributionRanking({
   return (
     <Panel className="divide-y divide-line p-0">
       {rows.map((row, i) => {
-        const total = row.answer_count + row.odai_count;
+        const total = row.answer_count + row.odai_count + row.pick_count;
         const mine = row.user_id === myUserId;
 
         return (
@@ -39,9 +39,9 @@ export function ContributionRanking({
               {mine && <span className="ml-1 text-xs text-muted">(あなた)</span>}
             </span>
             <span className="shrink-0 text-right text-xs text-muted">
-              <span className="font-bold text-white">{total}</span> 投稿
+              <span className="font-bold text-white">{total}</span> 貢献
               <span className="ml-1.5">
-                （回答{row.answer_count} / お題{row.odai_count}）
+                （回答{row.answer_count} / お題{row.odai_count} / 採点{row.pick_count}）
               </span>
             </span>
           </div>

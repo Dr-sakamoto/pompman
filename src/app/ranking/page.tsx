@@ -26,7 +26,7 @@ export default async function RankingPage() {
         <div>
           <h1 className="text-2xl font-bold">貢献度ランキング</h1>
           <p className="mt-1 text-sm text-muted">
-            結果発表済みのお題での投稿数（回答・お題）を集計しています。
+            投稿数（回答・お題・採点）を集計しています。結果発表前のお題への投稿・採点も含みます。
           </p>
         </div>
         <StreakBadge streak={streak} />
