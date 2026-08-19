@@ -284,8 +284,8 @@ export async function submitPicks(_prev: ActionState, formData: FormData): Promi
 }
 
 /**
- * 「出し切ったので他人の回答を見る」を宣言する。片道切符で、以後このお題には
- * 回答を追加できなくなる（判定は DB 側）。
+ * 採点に進む（他人の回答を見る）。片道切符で、以後このお題には
+ * 回答を追加できなくなる（判定は DB 側）。回答を書いていなくても呼べる。
  */
 export async function unlockAnswers(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));

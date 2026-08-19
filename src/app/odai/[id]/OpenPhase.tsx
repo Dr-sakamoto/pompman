@@ -29,11 +29,10 @@ const RANK_LABEL = ["1位", "2位", "3位"];
 /**
  * 回答と採点が同居するフェーズ。
  *
- * 他人の回答は「自分が解禁する」まで見えない（DB 側で担保）。解禁は
- * 「もう出し切った」という明示的な操作で、片道切符 —— 解禁した瞬間に
- * 全回答が見えて採点できるようになる代わりに、そのお題への回答追加は
- * できなくなる。書ける分をすべて書き終えてから解禁することで、
- * 「そのお題に書いたすべての回答が他人を見る前に書かれている」が保証される。
+ * 他人の回答は「自分が採点に進む」まで見えない（DB 側で担保）。採点に進むのは
+ * 片道切符 —— 進んだ瞬間に全回答が見えて採点できるようになる代わりに、
+ * そのお題への回答追加はできなくなる。回答を書いていなくても採点だけの
+ * 参加として進める（採点が一番大事な機能なので、そこへのハードルは低くする）。
  *
  * 誰が書いたかは結果発表まで伏せたまま。採点（picks）も結果発表まで他人には見えない。
  */
@@ -209,8 +208,8 @@ function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: 
     return (
       <Panel>
         <p className="text-sm text-muted">
-          このお題への回答は上限（{MAX_ANSWERS_PER_ODAI}個）に達しました。書き終えたら下の
-          「回答を出し切った」で解禁してください。
+          このお題への回答は上限（{MAX_ANSWERS_PER_ODAI}個）に達しました。下の
+          「採点に進む」から他の人の回答を見て採点できます。
         </p>
       </Panel>
     );
@@ -244,7 +243,7 @@ function AnswerForm({ odaiId, myAnswerCount }: { odaiId: number; myAnswerCount: 
   );
 }
 
-/** 「もう出し切った」の宣言。解禁は片道切符 —— 押すとそのお題には回答を追加できなくなる。 */
+/** 採点に進む。片道切符 —— 押すとそのお題には回答を追加できなくなる。回答を書いていなくても押せる。 */
 function UnlockPanel({
   odaiId,
   myAnswerCount,
@@ -255,43 +254,39 @@ function UnlockPanel({
   answerCount: number;
 }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(unlockAnswers, {});
-  const canUnlock = myAnswerCount > 0;
 
   return (
     <Panel className="space-y-3 border-dashed">
       <p className="text-sm font-bold">他の人の回答は伏せられています</p>
       <p className="text-sm text-muted">
-        書きたい回答をすべて書き終えたら、下のボタンでその場にある
-        {answerCount > 0 ? `${answerCount}件` : "回答"}
-        を解禁して採点できます。先に他人の回答を見るとそれに引きずられた回答になるので、
-        <strong className="text-white">解禁すると、このお題にはもう回答を追加できません</strong>
-        （片道切符）。
+        採点に進むとその場にある{answerCount > 0 ? `${answerCount}件` : "回答"}
+        が見えるようになります。
+        {myAnswerCount > 0 && (
+          <>
+            {" "}
+            <strong className="text-white">進むと、このお題にはもう回答を追加できません</strong>
+            （片道切符）。
+          </>
+        )}
       </p>
-      <p className="text-sm text-muted">
-        押し忘れても止まらないように、
-        <strong className="text-white">
-          最後に書いてから{AUTO_UNLOCK_IDLE_HOURS}時間経つと自動で解禁されます
-        </strong>
-        。まだ書き足すつもりなら、それまでに書いてください。
-      </p>
-      <form
-        action={action}
-        onSubmit={(e) => {
-          if (!window.confirm("これ以降、このお題には回答を追加できなくなります。よろしいですか？")) {
-            e.preventDefault();
-          }
-        }}
-        className="space-y-2"
-      >
+      {myAnswerCount > 0 && (
+        <p className="text-sm text-muted">
+          押し忘れても止まらないように、
+          <strong className="text-white">
+            最後に書いてから{AUTO_UNLOCK_IDLE_HOURS}時間経つと自動で解禁されます
+          </strong>
+          。まだ書き足すつもりなら、それまでに書いてください。
+        </p>
+      )}
+      <form action={action} className="space-y-2">
         <input type="hidden" name="odai_id" value={odaiId} />
         <button
           type="submit"
-          disabled={pending || !canUnlock}
+          disabled={pending}
           className="w-full rounded-md bg-accent px-4 py-2 font-bold text-ink disabled:opacity-40"
         >
-          {pending ? "処理中…" : "回答を出し切った → 他の人の回答を見る"}
+          {pending ? "処理中…" : "採点に進む"}
         </button>
-        {!canUnlock && <p className="text-xs text-muted">先に1つ回答してください。</p>}
         <ErrorText message={state.error} />
       </form>
     </Panel>
