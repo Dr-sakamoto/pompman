@@ -438,6 +438,20 @@ eq   "採点を終えた人数（judged）も2人" "2" $BOB \
      "select judged from odai_close_progress() where odai_id=$O_PROG;"
 root_eq "judged が判定側の scorer_count と一致する" "t" \
         "select (select judged from odai_close_progress() where odai_id=$O_PROG) = private.scorer_count($O_PROG);"
+
+# 無回答採点（0020）: 回答を書かずに解禁だけした人の picks / skip も
+# unlocked/scored/judged/finished に反映されていること（0021）。
+ok   "回答していない carol も解禁できる" $CAROL "select unlock_answers($O_PROG);"
+eq   "無回答での解禁も unlocked に数えられる" "3" $CAROL \
+     "select unlocked from odai_close_progress() where odai_id=$O_PROG;"
+eq   "参加者（回答した人）は無回答の解禁では増えない" "2" $CAROL \
+     "select participants from odai_close_progress() where odai_id=$O_PROG;"
+ok   "carol が「何も選ばない」で採点を終える" $CAROL "select submit_picks($O_PROG, array[]::bigint[]);"
+eq   "無回答での skip も judged / finished に数えられる" "3 3" $CAROL \
+     "select judged || ' ' || finished from odai_close_progress() where odai_id=$O_PROG;"
+root_eq "無回答の採点者を含めても judged は scorer_count と一致する" "t" \
+        "select (select judged from odai_close_progress() where odai_id=$O_PROG) = private.scorer_count($O_PROG);"
+
 eq   "猶予中なので、満タンでもまだ open" "open" $BOB "select phase from odai where id=$O_PROG;"
 
 # 表示している「選好ペア」が、仕様書 §8 (A) が実際に返す行数と一致していること。
