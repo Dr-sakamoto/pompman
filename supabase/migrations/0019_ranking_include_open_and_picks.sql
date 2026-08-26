@@ -14,7 +14,12 @@
 -- 単位として扱っているのと揃える。
 -- ============================================================================
 
-create or replace function public.contribution_ranking()
+-- 返り値の列（OUT パラメータ）が変わるので create or replace では置き換えられない
+-- （0019_min_scoring_to_close.sql の odai_close_progress() と同じ理由）。
+-- drop すると 0016 で付けた grant も落ちるので、末尾で付け直す。
+drop function if exists public.contribution_ranking();
+
+create function public.contribution_ranking()
 returns table (
   user_id       uuid,
   handle        text,
@@ -58,3 +63,6 @@ $$;
 
 comment on function public.contribution_ranking() is
   '投稿数（回答・お題・採点）ランキング。結果発表前のお題への投稿も含む。回答本文や作者の対応関係は含まない。';
+
+revoke all on function public.contribution_ranking() from public, anon;
+grant execute on function public.contribution_ranking() to authenticated;

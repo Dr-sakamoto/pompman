@@ -16,6 +16,9 @@ export function ClosedPhase({
 }) {
   const results = tally(answers, picks);
   const voters = new Set(picks.map((p) => p.voter_id)).size;
+  // 発表後に（名前を伏せたまま）採点した人（0023）。順位はこの採点も含めて集計して
+  // いるので、「前に見たときと順位が違う」の理由が画面から分かるようにしておく。
+  const retroVoters = new Set(picks.filter((p) => p.after_close).map((p) => p.voter_id)).size;
 
   // 全体順位はトップ3のみ発表する。自分の回答の順位・得点は本人にだけ見せる。
   const ranked = results.map((r, i) => ({ ...r, rank: i + 1 }));
@@ -34,6 +37,13 @@ export function ClosedPhase({
         回答 {answers.length}件 / 採点した人 {voters}人
         {skips > 0 && `（ほかに「選ぶ回答なし」${skips}人）`} ・ 1位=3点 / 2位=2点 / 3位=1点
       </p>
+
+      {retroVoters > 0 && (
+        <p className="text-sm text-muted">
+          うち{retroVoters}人は発表のあと、誰が書いたかを伏せたまま採点しています
+          （その分も点数に入るので、あとから順位が変わることがあります）。
+        </p>
+      )}
 
       {top3.length > 0 && (
         <div className="rounded-lg border border-line bg-panel p-4">

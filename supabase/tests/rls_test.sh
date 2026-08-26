@@ -135,7 +135,13 @@ ok   "closed 後の DELETE は0件に絞られる"    $ALICE "delete from picks 
 eq   "alice の picks は消えていない"               "1" $ALICE "select count(*) from picks where voter_id='$ALICE';"
 deny "role の自己昇格はできない"             $BOB   "update users set role='admin' where id='$BOB';"
 eq   "bob の role は member のまま"                "member" $BOB "select role from users where id='$BOB';"
-ok   "handle は自分で変更できる"             $BOB   "update users set handle='bob2' where id='$BOB';"
+# 表示名の変更は30日に1回まで（0018）。作りたてのアカウントはまだ変えられない。
+deny "作りたてのアカウントは表示名を変更できない" $BOB "update users set handle='bob2' where id='$BOB';"
+$PSQL -v ON_ERROR_STOP=1 \
+  -c "update public.users set handle_changed_at = now() - interval '31 days' where id='$BOB';" > /dev/null
+ok   "クールダウンが明ければ handle は自分で変更できる" $BOB "update users set handle='bob2' where id='$BOB';"
+root_eq "変更した時刻が更新される" "t" \
+        "select handle_changed_at > now() - interval '1 minute' from public.users where id='$BOB';"
 
 echo
 echo "== 1人あたりの回答数の上限 =="
@@ -372,6 +378,107 @@ eq   "回答が1件も無いお題は寿命が来ても閉じない" "open" $ERI
 # 自動解禁でも「解禁後に書かれた回答」が生まれていないことを、ここで改めて直接見る。
 root_eq "自動解禁を挟んでも解禁後に書かれた回答は0件" "0" \
         "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
+
+echo
+echo "== 結果発表後の後追い採点（0023） =="
+# 発表（closed）はこれまでお題の状態だったので、その瞬間に採点していなかった人の
+# picks は永久に取れなかった。closed でも「まだ結果を見ていない人」には回答者名と
+# 他人の picks を伏せたままにして、後から採点できるようにしてある。
+# 結果を見た瞬間に採点は閉じる（見てから付けた順位は同調のログなので残さない）。
+
+ok   "dave が後追い採点テスト用のお題を作る" $DAVE "insert into odai(author_id,text) values ('$DAVE','後追い採点テスト用');"
+O_RETRO=$($PSQL -c "select max(id) from odai;")
+ok   "alice 回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O_RETRO,'$ALICE','alice の回答');"
+ok   "bob 回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O_RETRO,'$BOB','bob の回答');"
+RT_A=$($PSQL -c "select id from answers where odai_id=$O_RETRO and author_id='$ALICE' limit 1;")
+RT_B=$($PSQL -c "select id from answers where odai_id=$O_RETRO and author_id='$BOB' limit 1;")
+ok   "alice が解禁して採点" $ALICE \
+     "select unlock_answers($O_RETRO); select submit_picks($O_RETRO, array[$RT_B]::bigint[]);"
+ok   "bob が解禁して採点"   $BOB \
+     "select unlock_answers($O_RETRO); select submit_picks($O_RETRO, array[$RT_A]::bigint[]);"
+ok   "出題者が締め切る" $DAVE "select close_odai($O_RETRO);"
+
+echo
+echo "-- 発表前に採点した人は今までどおり（発表＝すぐ結果が見える） --"
+root_eq "採点していた2人には締め切りの瞬間に結果が開く" "2" \
+        "select count(*) from result_reveals where odai_id=$O_RETRO;"
+eq   "採点した alice には回答者名が見える"       "2" $ALICE \
+     "select count(*) from answers_view where odai_id=$O_RETRO and author_id is not null;"
+eq   "採点した alice には他人の picks も見える"  "2" $ALICE \
+     "select count(*) from picks where odai_id=$O_RETRO;"
+root_eq "発表前の採点に後追いの印は付かない" "0" \
+        "select count(*) from picks where odai_id=$O_RETRO and after_close;"
+ok   "発表前に採点した alice の DELETE は0件に絞られる" $ALICE "delete from picks where odai_id=$O_RETRO;"
+root_eq "alice の採点は消えていない" "1" \
+        "select count(*) from picks where odai_id=$O_RETRO and voter_id='$ALICE';"
+
+echo
+echo "-- 未採点の人には、発表後でも名前と他人の採点が伏せられている --"
+ok   "未採点の erin が後から「何も選ばない」で採点を終える" $ERIN \
+     "select submit_picks($O_RETRO, array[]::bigint[]);"
+root_eq "後追いの「選ぶ回答なし」には after_close が立つ" "t" \
+        "select after_close from pick_skips where odai_id=$O_RETRO and voter_id='$ERIN';"
+root_eq "採点を終えた erin には結果が開く" "1" \
+        "select count(*) from result_reveals where odai_id=$O_RETRO and user_id='$ERIN';"
+deny "結果を見たあとは採点できない(erin)" $ERIN "select submit_picks($O_RETRO, array[$RT_A]::bigint[]);"
+
+eq   "未採点の carol にも回答そのものは見える"        "2" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_RETRO;"
+eq   "未採点の carol には回答者名が伏せられている"    "0" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_RETRO and author_id is not null;"
+eq   "未採点の carol には他人の picks が1件も見えない" "0" $CAROL \
+     "select count(*) from picks where odai_id=$O_RETRO;"
+eq   "未採点の carol には他人の「選ぶ回答なし」も見えない" "0" $CAROL \
+     "select count(*) from pick_skips where odai_id=$O_RETRO;"
+deny "発表後の採点を「発表前の採点」として入れられない" $CAROL \
+     "insert into picks(odai_id,voter_id,answer_id,rank,after_close) values ($O_RETRO,'$CAROL',$RT_A,1,false);"
+
+echo
+echo "-- 後から採点すると、その場で結果が開く --"
+ok   "carol が後から採点する" $CAROL "select submit_picks($O_RETRO, array[$RT_A,$RT_B]::bigint[]);"
+root_eq "後追いの採点には after_close が立つ" "2" \
+        "select count(*) from picks where odai_id=$O_RETRO and voter_id='$CAROL' and after_close;"
+eq   "採点したら回答者名が見える(carol)" "2" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_RETRO and author_id is not null;"
+eq   "採点したら他人の picks も見える(carol)" "4" $CAROL \
+     "select count(*) from picks where odai_id=$O_RETRO;"
+eq   "採点したら erin の「選ぶ回答なし」も見える" "1" $CAROL \
+     "select count(*) from pick_skips where odai_id=$O_RETRO;"
+deny "後追いの採点はやり直せない（結果を見たあとだから）" $CAROL \
+     "select submit_picks($O_RETRO, array[$RT_B]::bigint[]);"
+ok   "結果を見たあとの DELETE は0件に絞られる" $CAROL "delete from picks where odai_id=$O_RETRO;"
+root_eq "carol の採点は消えていない" "2" \
+        "select count(*) from picks where odai_id=$O_RETRO and voter_id='$CAROL';"
+
+echo
+echo "-- 採点せずに結果を見る（片道切符） --"
+eq   "出題者でも採点していなければ回答者名は伏せられる" "0" $DAVE \
+     "select count(*) from answers_view where odai_id=$O_RETRO and author_id is not null;"
+deny "他人名義で「結果を見た」宣言はできない" $DAVE \
+     "insert into result_reveals(odai_id,user_id) values ($O_RETRO,'$BOB');"
+deny "発表前のお題では結果を見た宣言はできない" $DAVE "select reveal_results($O_EMPTY);"
+ok   "dave が採点せずに結果を見る" $DAVE "select reveal_results($O_RETRO);"
+eq   "見たあとは回答者名が見える(dave)" "2" $DAVE \
+     "select count(*) from answers_view where odai_id=$O_RETRO and author_id is not null;"
+deny "結果を見たあとは採点できない(dave)" $DAVE "select submit_picks($O_RETRO, array[$RT_A]::bigint[]);"
+deny "結果を見た宣言は取り消せない" $DAVE "delete from result_reveals where odai_id=$O_RETRO;"
+
+echo
+echo "-- after_close は phase と必ず一致する（学習時に信じられる印にする） --"
+ok   "erin が印テスト用のお題を作る" $ERIN "insert into odai(author_id,text) values ('$ERIN','after_close 印テスト用');"
+O_FLAG=$($PSQL -c "select max(id) from odai;")
+ok   "alice 回答" $ALICE "insert into answers(odai_id,author_id,text) values ($O_FLAG,'$ALICE','alice の回答');"
+ok   "bob 回答"   $BOB   "insert into answers(odai_id,author_id,text) values ($O_FLAG,'$BOB','bob の回答');"
+FL_B=$($PSQL -c "select id from answers where odai_id=$O_FLAG and author_id='$BOB' limit 1;")
+ok   "alice が解禁する" $ALICE "select unlock_answers($O_FLAG);"
+deny "発表前の採点に後追いの印は付けられない" $ALICE \
+     "insert into picks(odai_id,voter_id,answer_id,rank,after_close) values ($O_FLAG,'$ALICE',$FL_B,1,true);"
+ok   "印が false なら発表前でも入る" $ALICE \
+     "insert into picks(odai_id,voter_id,answer_id,rank,after_close) values ($O_FLAG,'$ALICE',$FL_B,1,false);"
+root_eq "after_close が立った採点は必ず closed のお題のもの（全お題ぶん）" "0" \
+        "select count(*) from picks p join odai o on o.id = p.odai_id where p.after_close and o.phase <> 'closed';"
+root_eq "「選ぶ回答なし」の印も同じ（全お題ぶん）" "0" \
+        "select count(*) from pick_skips s join odai o on o.id = s.odai_id where s.after_close and o.phase <> 'closed';"
 
 echo
 echo "== 本名メモ（管理者専用） =="

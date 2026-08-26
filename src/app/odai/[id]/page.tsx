@@ -7,6 +7,7 @@ import { PhaseBadge } from "@/components/ui";
 import { CloseProgress } from "@/components/CloseProgress";
 import { OpenPhase } from "./OpenPhase";
 import { ClosedPhase } from "./ClosedPhase";
+import { RetroPhase } from "./RetroPhase";
 
 export default async function OdaiPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -41,6 +42,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     { data: userRows },
     { data: countRows },
     { data: unlockRows },
+    { data: revealRows },
     { data: progressRows },
   ] = await Promise.all([
     requireMember(),
@@ -62,6 +64,10 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     // 自分がこのお題を解禁済みかどうか（未解禁だと answers_view が自分の分しか返らないので、
     // 「まだ誰も他に回答していない」のか「単に未解禁」なのかを区別するのに要る）。
     supabase.from("answer_unlocks").select("odai_id, user_id").eq("odai_id", odaiId),
+    // 自分がこのお題の結果を見たかどうか（0023）。発表済みでも、まだ見ていない人には
+    // 回答者名も他人の採点も伏せたままで、代わりに後から採点できる。
+    // RLS が自分の行しか返さないので、こちらも受け取ってから絞る。
+    supabase.from("result_reveals").select("odai_id, user_id").eq("odai_id", odaiId),
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     // 返るのは open のお題だけ。
     supabase.rpc("odai_close_progress"),
@@ -78,6 +84,8 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       (r) => r.odai_id === odaiId,
     )?.answer_count ?? 0;
   const unlocked = (unlockRows ?? []).some((r) => r.user_id === user.id);
+  // 結果を見た人＝もう採点できない人。見ていなければ、発表済みでも伏せたまま採点できる。
+  const revealed = (revealRows ?? []).some((r) => r.user_id === user.id);
   const isOwner = odai.author_id === user.id;
   const progress =
     ((progressRows ?? []) as CloseProgressRow[]).find((r) => Number(r.odai_id) === odaiId) ?? null;
@@ -91,8 +99,10 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
       <div className="space-y-2">
         <PhaseBadge phase={odai.phase} />
         <h1 className="text-2xl font-bold leading-snug">{odai.text}</h1>
+        {/* 出題者名も結果の一部。まだ結果を見ていない人には伏せたままにする（0023）。 */}
         <p className="text-sm text-muted">
-          出題: {odai.phase === "closed" ? handles.get(odai.author_id) ?? "?" : "匿名"}
+          出題:{" "}
+          {odai.phase === "closed" && revealed ? handles.get(odai.author_id) ?? "?" : "匿名"}
         </p>
         {/* 一覧のカードと同じ2本。お題1件について知りたいことは場所によって変わらない。 */}
         {odai.phase === "open" && progress && (
@@ -113,7 +123,21 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {odai.phase === "closed" && (
+      {/*
+        発表済みでも、まだ採点していない（＝結果を見ていない）人には結果ではなく
+        採点画面を出す。取りこぼしていた採点をここで拾う（0023）。
+      */}
+      {odai.phase === "closed" && !revealed && (
+        <RetroPhase
+          odai={odai}
+          answers={answers}
+          myPicks={picks.filter((p) => p.voter_id === user.id)}
+          mySkipped={pickSkips.some((s) => s.voter_id === user.id)}
+          voterId={user.id}
+        />
+      )}
+
+      {odai.phase === "closed" && revealed && (
         <ClosedPhase
           answers={answers}
           picks={picks}

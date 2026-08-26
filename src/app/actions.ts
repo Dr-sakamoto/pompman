@@ -304,6 +304,25 @@ export async function unlockAnswers(_prev: ActionState, formData: FormData): Pro
   return {};
 }
 
+/**
+ * 採点せずに結果（回答者名・全員の採点）を開ける。片道切符で、以後そのお題は
+ * 採点できなくなる（判定は DB 側。0023）。結果を見てから付けた順位は、
+ * 他人に合わせただけの記録に化けるので受け付けない。
+ */
+export async function revealResults(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const odaiId = Number(formData.get("odai_id"));
+  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
+
+  await requireMember();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reveal_results", { p_odai_id: odaiId });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/odai/${odaiId}`);
+  revalidatePath("/");
+  return {};
+}
+
 /** 回答・採点を締め切って結果を発表する。出題者だけが呼べる（判定は DB 側）。 */
 export async function closeOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));
