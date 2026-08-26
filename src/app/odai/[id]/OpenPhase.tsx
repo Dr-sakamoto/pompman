@@ -294,7 +294,7 @@ function UnlockPanel({
 }
 
 /**
- * 採点そのもの。open のあいだと、発表後にまだ採点していない人（0022）の
+ * 採点そのもの。open のあいだと、発表後にまだ採点していない人（0023）の
  * 両方から使う。見えているものは同じ —— 回答は匿名、他人の picks は伏せたまま。
  * 違うのは「送ったあとどうなるか」だけなので、そこの文言だけを late で分ける。
  */
@@ -353,7 +353,7 @@ export function PickForm({
     <div className="space-y-4">
       <p className="text-sm text-muted">
         {pickable === 0
-          ? "まだ他の人の回答がありません。集まったら面白い順に選んでください。"
+          ? "まだ他の人の回答がありません。集まったら面白い順に選んでください。今は下から「採点を終える」だけ押せます。"
           : late
             ? `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。送ると結果が見られます。`
             : `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。回答が増えたら何度でも選び直せます。`}
@@ -400,8 +400,8 @@ export function PickForm({
         })}
       </ul>
 
-      {pickable > 0 && (
-        <Panel>
+      <Panel>
+        {pickable > 0 && (
           <form action={action} className="space-y-3">
             <input type="hidden" name="odai_id" value={odaiId} />
             {selected.map((id, i) => (
@@ -430,24 +430,41 @@ export function PickForm({
             )}
             <ErrorText message={state.error} />
           </form>
+        )}
 
-          <form action={skipAction} className="mt-3 space-y-2 border-t border-line pt-3">
-            <input type="hidden" name="odai_id" value={odaiId} />
-            <button
-              type="submit"
-              disabled={skipPending}
-              className="w-full rounded-md border border-line px-4 py-2 text-sm hover:border-white/25 disabled:opacity-40"
-            >
-              {skipPending ? "送信中…" : "何も選ばない（採点を終える）"}
-            </button>
-            <p className="text-xs text-muted">
-              面白い回答が無かったときはこちら。採点は0件のまま終えたことになります。
-              {late && " 送ると結果が見られます。"}
-            </p>
-            <ErrorText message={skipState.error} />
-          </form>
-        </Panel>
-      )}
+        {/*
+          他人の回答がまだ0件（pickable=0）でも押せる。回答が無い以上「選ぶ」ことは
+          できないが、「もう次の操作は無い」ことは宣言できてよい —— これが無いと、
+          無回答で解禁した人は自動で finished 扱いになる（0021）だけで、結果発表後の
+          「採点した人」表示や貢献度ランキングには一切現れず、採点したのに
+          何もしていないことにされる。
+        */}
+        <form
+          action={skipAction}
+          className={`space-y-2 ${pickable > 0 ? "mt-3 border-t border-line pt-3" : ""}`}
+        >
+          <input type="hidden" name="odai_id" value={odaiId} />
+          <button
+            type="submit"
+            disabled={skipPending}
+            className="w-full rounded-md border border-line px-4 py-2 text-sm hover:border-white/25 disabled:opacity-40"
+          >
+            {skipPending ? "送信中…" : "何も選ばない（採点を終える）"}
+          </button>
+          <p className="text-xs text-muted">
+            {/*
+              発表後の採点（0023）では回答がもう増えないし、送った時点で結果が見える。
+              「回答が増えたら選び直せる」は嘘になるので、late だけ別の文面にする。
+            */}
+            {late
+              ? "面白い回答が無かったときはこちら。採点は0件のまま終えたことになります。送ると結果が見られます。"
+              : pickable > 0
+                ? "面白い回答が無かったときはこちら。採点は0件のまま終えたことになります。"
+                : "他の人の回答が増えるまで待たずに採点を終える宣言です。回答が増えたらいつでも選び直せます。"}
+          </p>
+          <ErrorText message={skipState.error} />
+        </form>
+      </Panel>
     </div>
   );
 }

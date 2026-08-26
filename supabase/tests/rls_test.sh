@@ -484,6 +484,15 @@ eq   "採点できない人は解禁だけで finished（分子は1）" "1" $ERI
      "select finished from odai_close_progress() where odai_id=$O_SOLO;"
 eq   "ただし採点はしていないので judged は0（時間バーは「採点待ち」になる）" "0" $ERIN \
      "select judged from odai_close_progress() where odai_id=$O_SOLO;"
+
+# 選べる回答が0件でも「何も選ばない」は明示的に送れる（0022）。これが無いと、
+# 無回答で解禁した人は自動 finished 扱いになるだけで pick_skips に行が残らず、
+# 結果発表後の「採点した人」表示や貢献度ランキングに一切現れない。
+ok   "選べる回答が無くても『何も選ばない』は送れる" $ERIN \
+     "select submit_picks($O_SOLO, array[]::bigint[]);"
+eq   "明示的に skip すれば judged にも数えられる" "1" $ERIN \
+     "select judged from odai_close_progress() where odai_id=$O_SOLO;"
+
 eq   "それでも参加者は1人なので発表されない" "open" $ERIN "select phase from odai where id=$O_SOLO;"
 
 echo
@@ -538,7 +547,7 @@ eq   "一度 claim したら二度と出てこない（二重送信しない）"
 root_eq "closed_notified_at が入る" "t" "select (closed_notified_at is not null) from odai where id=$O_NOTIFY;"
 
 echo
-echo "== 結果発表後の採点（0022） =="
+echo "== 結果発表後の採点（0023） =="
 # 発表後でも「発表前に解禁していて、まだ採点していない人」は採点できる。
 # ただし採点するまで結果（誰が書いたか・誰が誰を選んだか）は見えない。
 ok   "alice が発表後採点テスト用のお題を作る" $ALICE \
@@ -611,7 +620,7 @@ eq   "そもそも解禁していない alice にも出ない" "0" $ALICE \
      "select count(*) from my_scoreable_closed_odai() where odai_id=$O_LATE;"
 
 echo
-echo "-- 既存の発表済みお題は全員「もう見た」で埋めてある（migration 0022 §3） --"
+echo "-- 既存の発表済みお題は全員「もう見た」で埋めてある（migration 0023 §3） --"
 # このお題より前に closed になったものは、誰が見たか分からないので安全側に倒してある。
 root_eq "解禁済み × closed の組はすべて reveal 済みか、発表後に採点している" "0" \
      "select count(*) from answer_unlocks k

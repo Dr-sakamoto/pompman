@@ -1,6 +1,10 @@
 -- ============================================================================
 -- 結果発表後でも、まだ採点していない人は採点できるようにする。
 --
+-- 注: submit_picks() は 0022（他人の回答が0件でも「何も選ばない」を受け付ける）
+-- を土台にしている。この定義は 0022 のチェック順序をそのまま保ったうえで、
+-- フェーズの判定だけを緩めたもの。両方の変更が同時に効いている必要がある。
+--
 -- 実測（2026-08-26 / 本番）で、解禁106件のうち51件（48%）が一度も採点されない
 -- まま終わっていた。しかも解禁の63%は自動解禁で、本人が見ていない間に起きる。
 -- 気づいたときにはお題が発表済みで、そこから先は `phase = 'open'` を要求する
@@ -202,7 +206,7 @@ where
 comment on view public.answers_view is
   '回答の閲覧はすべてこのビュー経由。解禁する（unlock_answers）まで他人の回答は返らない。'
   'author_id は private.results_visible() が真になるまで自分の回答以外 null —— '
-  '結果発表後でも、まだ採点していない人には伏せたまま（0022）。';
+  '結果発表後でも、まだ採点していない人には伏せたまま（0023）。';
 
 revoke all on public.answers_view from anon, authenticated;
 grant select on public.answers_view to authenticated;
@@ -315,11 +319,10 @@ begin
     raise exception '先に回答を出し切って解禁してください' using errcode = 'P0001';
   end if;
 
-  v_max := least(3, private.pickable_answer_count(p_odai_id, v_uid));
-  if v_max = 0 then
-    raise exception '選べる回答がありません' using errcode = 'P0001';
-  end if;
-
+  -- 「何も選ばない」の明示的な宣言は、選べる回答が0件でも常に受け付ける（0022）。
+  -- この順序（v_given = 0 を pickable のチェックより前に置く）は 0022 で入れたもので、
+  -- 崩さないこと —— 戻すと、他人の回答がまだ無いお題を最初に解禁した人が
+  -- 「選べる回答がありません」で弾かれ、採点を終えられなくなる。
   if v_given = 0 then
     delete from public.picks p
      where p.odai_id = p_odai_id and p.voter_id = v_uid;
@@ -329,6 +332,11 @@ begin
     on conflict (odai_id, voter_id) do nothing;
 
     return;
+  end if;
+
+  v_max := least(3, private.pickable_answer_count(p_odai_id, v_uid));
+  if v_max = 0 then
+    raise exception '選べる回答がありません' using errcode = 'P0001';
   end if;
 
   if (select count(distinct x) from unnest(p_answer_ids) x) <> v_given then
@@ -352,8 +360,10 @@ end
 $$;
 
 comment on function public.submit_picks(bigint, bigint[]) is
-  '採点を送る（0件なら「選ぶ回答なし」の宣言）。open のあいだと、'
-  '発表後でもまだ結果を見ていない解禁済みの人（private.can_score_late）が呼べる。';
+  '採点を送る。空配列（0件）は「何も選ばない」の明示的な宣言として、'
+  '選べる回答が0件のときも常に受け付ける（0022）。1件以上選ぼうとしたときだけ'
+  '選べる回答が無ければ弾く。open のあいだに加えて、発表後でもまだ結果を'
+  '見ていない解禁済みの人（private.can_score_late）が呼べる（0023）。';
 
 revoke all on function public.submit_picks(bigint, bigint[]) from public, anon;
 grant execute on function public.submit_picks(bigint, bigint[]) to authenticated;

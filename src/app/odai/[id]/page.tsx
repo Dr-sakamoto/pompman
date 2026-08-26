@@ -67,7 +67,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     // 返るのは open のお題だけ。
     supabase.rpc("odai_close_progress"),
-    // 発表済みだが自分はまだ採点できるお題（0022）。判定は DB 側の
+    // 発表済みだが自分はまだ採点できるお題（0023）。判定は DB 側の
     // private.can_score_late() 一本なので、ここで条件を組み立て直さない。
     supabase.rpc("my_scoreable_closed_odai"),
   ]);

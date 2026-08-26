@@ -220,7 +220,7 @@ create table answer_unlocks (
   primary key (odai_id, user_id)
 );
 
--- 結果を見た記録（「採点せずに結果を見る」の宣言。片道切符。0022）
+-- 結果を見た記録（「採点せずに結果を見る」の宣言。片道切符。0023）
 create table result_reveals (
   odai_id     bigint not null references odai(id) on delete cascade,
   user_id     uuid not null references users(id),
@@ -289,8 +289,8 @@ Supabase の RLS を必ず有効化する。特に以下は必須。
 - `picks` の INSERT: `odai.phase = 'open'` かつ**自分がそのお題を解禁済み**のときのみ
 - `picks` の INSERT: **自分の回答は選べない**（`answers.author_id <> auth.uid()`）
 - `picks` の SELECT: `odai.phase = 'closed'` 以降のみ他人のpicksが読める。
-  ただし**まだ採点していない解禁済みの人には伏せたまま**（`0022`。判定は `private.results_visible()`）
-- `picks` の INSERT: `open` のあいだに加えて、**発表後でもまだ結果を見ていない解禁済みの人**は入れられる（`0022`）
+  ただし**まだ採点していない解禁済みの人には伏せたまま**（`0023`。判定は `private.results_visible()`）
+- `picks` の INSERT: `open` のあいだに加えて、**発表後でもまだ結果を見ていない解禁済みの人**は入れられる（`0023`）
 - 回答数（`odai_answer_counts()`）だけは誰にでも見せる。集計値に中身は含まれないため
 
 いずれもUX上の都合ではなく、**データ品質の要件**。
@@ -353,7 +353,7 @@ DB層の保証ではない。API を直接叩けば見える点は `answers`/`pi
 - 採点した人数と、「選ぶ回答なし」で終えた人数を分けて出す。0票が並ぶ結果のとき、それが
   「誰も見ていない」のか「見た上で誰も選ばなかった」のかで意味がまるで違うため
 
-### 5.3.1 発表後の採点（`0022`）
+### 5.3.1 発表後の採点（`0023`）
 
 **結果発表後でも、まだ採点していない人は採点できる。** ただし採点するまで結果は見せない。
 

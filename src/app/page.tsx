@@ -63,7 +63,7 @@ export default async function HomePage() {
     supabase.rpc("odai_close_progress"),
     // 連続参加日数（回答 or 採点）。自分の行しか返らないので誰かに見せる情報ではない。
     supabase.rpc("my_streak"),
-    // 発表済みだが自分はまだ採点できるお題（0022）。自動解禁のまま採点されずに
+    // 発表済みだが自分はまだ採点できるお題（0023）。自動解禁のまま採点されずに
     // 発表まで行ったぶんが、ここに出てくる。
     supabase.rpc("my_scoreable_closed_odai"),
   ]);
@@ -140,7 +140,7 @@ export default async function HomePage() {
                 const progress = closeProgress.get(o.id);
                 const todo =
                   o.phase !== "open"
-                    ? // 発表済みでも、まだ採点していない人には採点の余地が残っている（0022）
+                    ? // 発表済みでも、まだ採点していない人には採点の余地が残っている（0023）
                       scoreableClosed.has(o.id)
                       ? "採点できます"
                       : null
