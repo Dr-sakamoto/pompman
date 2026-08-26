@@ -7,6 +7,7 @@ import { PhaseBadge } from "@/components/ui";
 import { CloseProgress } from "@/components/CloseProgress";
 import { OpenPhase } from "./OpenPhase";
 import { ClosedPhase } from "./ClosedPhase";
+import { LateScoring } from "./LateScoring";
 
 export default async function OdaiPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,6 +43,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     { data: countRows },
     { data: unlockRows },
     { data: progressRows },
+    { data: scoreableRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").eq("id", odaiId).maybeSingle(),
@@ -65,6 +67,9 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     // 返るのは open のお題だけ。
     supabase.rpc("odai_close_progress"),
+    // 発表済みだが自分はまだ採点できるお題（0022）。判定は DB 側の
+    // private.can_score_late() 一本なので、ここで条件を組み立て直さない。
+    supabase.rpc("my_scoreable_closed_odai"),
   ]);
 
   if (!odaiRow) notFound();
@@ -81,6 +86,10 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
   const isOwner = odai.author_id === user.id;
   const progress =
     ((progressRows ?? []) as CloseProgressRow[]).find((r) => Number(r.odai_id) === odaiId) ?? null;
+  // 発表済みでも、まだ採点していない解禁済みの人には結果を出さず先に採点させる。
+  const canScoreLate = ((scoreableRows ?? []) as { odai_id: number }[]).some(
+    (r) => Number(r.odai_id) === odaiId,
+  );
 
   return (
     <div className="space-y-6">
@@ -113,7 +122,11 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {odai.phase === "closed" && (
+      {odai.phase === "closed" && canScoreLate && (
+        <LateScoring odai={odai} answers={answers} voterId={user.id} />
+      )}
+
+      {odai.phase === "closed" && !canScoreLate && (
         <ClosedPhase
           answers={answers}
           picks={picks}

@@ -220,6 +220,14 @@ create table answer_unlocks (
   primary key (odai_id, user_id)
 );
 
+-- 結果を見た記録（「採点せずに結果を見る」の宣言。片道切符。0022）
+create table result_reveals (
+  odai_id     bigint not null references odai(id) on delete cascade,
+  user_id     uuid not null references users(id),
+  revealed_at timestamptz not null default now(),
+  primary key (odai_id, user_id)
+);
+
 create index on answers (odai_id);
 create index on picks (odai_id);
 create index on picks (voter_id);
@@ -280,7 +288,9 @@ Supabase の RLS を必ず有効化する。特に以下は必須。
   UPDATE / DELETE のポリシーは無い（解禁は取り消せない・やり直せない）
 - `picks` の INSERT: `odai.phase = 'open'` かつ**自分がそのお題を解禁済み**のときのみ
 - `picks` の INSERT: **自分の回答は選べない**（`answers.author_id <> auth.uid()`）
-- `picks` の SELECT: `odai.phase = 'closed'` 以降のみ他人のpicksが読める
+- `picks` の SELECT: `odai.phase = 'closed'` 以降のみ他人のpicksが読める。
+  ただし**まだ採点していない解禁済みの人には伏せたまま**（`0022`。判定は `private.results_visible()`）
+- `picks` の INSERT: `open` のあいだに加えて、**発表後でもまだ結果を見ていない解禁済みの人**は入れられる（`0022`）
 - 回答数（`odai_answer_counts()`）だけは誰にでも見せる。集計値に中身は含まれないため
 
 いずれもUX上の都合ではなく、**データ品質の要件**。
@@ -342,6 +352,32 @@ DB層の保証ではない。API を直接叩けば見える点は `answers`/`pi
 - **誰にも選ばれなかった回答も必ず一覧に表示する**（消さない・隠さない）
 - 採点した人数と、「選ぶ回答なし」で終えた人数を分けて出す。0票が並ぶ結果のとき、それが
   「誰も見ていない」のか「見た上で誰も選ばなかった」のかで意味がまるで違うため
+
+### 5.3.1 発表後の採点（`0022`）
+
+**結果発表後でも、まだ採点していない人は採点できる。** ただし採点するまで結果は見せない。
+
+実測で、解禁106件のうち51件（48%）が採点されないまま終わっていた。解禁の63%は自動解禁で、
+本人が見ていない間に起きる。気づいたときには発表済みで、そこから先は `phase = 'open'` を
+要求する RLS に阻まれる —— その人の選好は永久に失われる。
+
+そのまま発表画面に採点ボタンを足すと §4.3 の2つがそのまま起きる（作者名が見えている状態で
+選ぶ＝人気投票、他人の picks が見えている状態で選ぶ＝同調ログ）。**汚染するのは「いつ採点したか」
+ではなく「採点する時点で何が見えていたか」**なので、時間ではなく状態で分ける。
+
+| | 他人の回答の本文 | 誰が書いたか | 他人の採点 | 自分の採点 |
+|---|---|---|---|---|
+| 発表後・まだ採点していない | 見える | 見えない | 見えない | **できる** |
+| 発表後・採点した / 結果を見た | 見える | 見える | 見える | できない |
+
+- 対象は**発表前にそのお題を解禁していて、まだ採点していない人**だけ。解禁していない人
+  （新規メンバーを含む）は今まで通りすぐ結果が見える
+- 「結果を見た」は `result_reveals` に明示的に持つ。`answer_unlocks` と同じ**片道切符**
+- 判定は `private.results_visible()` の1つにまとめ、`answers_view` の `author_id` /
+  `picks_select` / `pick_skips_select` が全部これを見る。**3箇所に別々の式を書かない**
+- **採点は強制しない。**「採点せずに結果を見る」を必ず併記する（中身を読まずに付けた picks は
+  採点0より悪い、§4.3）
+- 既存の発表済みお題は全員「もう見た」で埋めてある。誰が見たかの記録が無く、判別できないため
 
 ### 5.4 貢献度ランキング（`/ranking`）と連続日数ストリーク
 

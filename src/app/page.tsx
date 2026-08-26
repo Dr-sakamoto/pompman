@@ -45,6 +45,7 @@ export default async function HomePage() {
     { data: progressRows },
     { data: closeRows },
     { data: streakRows },
+    { data: scoreableRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
@@ -62,6 +63,9 @@ export default async function HomePage() {
     supabase.rpc("odai_close_progress"),
     // 連続参加日数（回答 or 採点）。自分の行しか返らないので誰かに見せる情報ではない。
     supabase.rpc("my_streak"),
+    // 発表済みだが自分はまだ採点できるお題（0022）。自動解禁のまま採点されずに
+    // 発表まで行ったぶんが、ここに出てくる。
+    supabase.rpc("my_scoreable_closed_odai"),
   ]);
 
   const odai = (odaiRows ?? []) as Odai[];
@@ -86,6 +90,9 @@ export default async function HomePage() {
     ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
   );
   const streak = (streakRows?.[0] ?? { streak_days: 0, last_active_date: null }) as StreakStats;
+  const scoreableClosed = new Set(
+    ((scoreableRows ?? []) as { odai_id: number }[]).map((r) => Number(r.odai_id)),
+  );
 
   return (
     <div className="space-y-8">
@@ -133,7 +140,10 @@ export default async function HomePage() {
                 const progress = closeProgress.get(o.id);
                 const todo =
                   o.phase !== "open"
-                    ? null
+                    ? // 発表済みでも、まだ採点していない人には採点の余地が残っている（0022）
+                      scoreableClosed.has(o.id)
+                      ? "採点できます"
+                      : null
                     : mine === 0
                       ? "未回答"
                       : !isUnlocked

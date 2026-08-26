@@ -304,6 +304,27 @@ export async function unlockAnswers(_prev: ActionState, formData: FormData): Pro
   return {};
 }
 
+/**
+ * 採点せずに結果を見る（0022）。片道切符で、以後そのお題には採点できなくなる。
+ *
+ * 発表後に採点できるのは「発表前に解禁していて、まだ結果を見ていない人」だけ。
+ * 見てからの採点は「誰が書いたか」「他人が何を選んだか」を知った上の選択になり、
+ * picks が人気投票・同調ログに化ける（README §4.3）。判定は DB 側。
+ */
+export async function revealResults(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const odaiId = Number(formData.get("odai_id"));
+  if (!Number.isInteger(odaiId)) return { error: "お題が不正です" };
+
+  await requireMember();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reveal_results", { p_odai_id: odaiId });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/odai/${odaiId}`);
+  revalidatePath("/");
+  return {};
+}
+
 /** 回答・採点を締め切って結果を発表する。出題者だけが呼べる（判定は DB 側）。 */
 export async function closeOdai(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));

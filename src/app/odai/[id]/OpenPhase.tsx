@@ -293,13 +293,19 @@ function UnlockPanel({
   );
 }
 
-function PickForm({
+/**
+ * 採点そのもの。open のあいだと、発表後にまだ採点していない人（0022）の
+ * 両方から使う。見えているものは同じ —— 回答は匿名、他人の picks は伏せたまま。
+ * 違うのは「送ったあとどうなるか」だけなので、そこの文言だけを late で分ける。
+ */
+export function PickForm({
   odaiId,
   answers,
   myPicks,
   mySkipped,
   maxPicks,
   pickable,
+  late = false,
 }: {
   odaiId: number;
   answers: AnswerView[];
@@ -307,6 +313,7 @@ function PickForm({
   mySkipped: boolean;
   maxPicks: number;
   pickable: number;
+  late?: boolean;
 }) {
   const [selected, setSelected] = useState<number[]>(() =>
     myPicks
@@ -347,7 +354,9 @@ function PickForm({
       <p className="text-sm text-muted">
         {pickable === 0
           ? "まだ他の人の回答がありません。集まったら面白い順に選んでください。"
-          : `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。回答が増えたら何度でも選び直せます。`}
+          : late
+            ? `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。送ると結果が見られます。`
+            : `面白かった順に最大${maxPicks}つ選んでください。途中まででも送れます。回答が増えたら何度でも選び直せます。`}
       </p>
 
       {mySkipped && selected.length === 0 && (
@@ -407,9 +416,11 @@ function PickForm({
                 ? "送信中…"
                 : selected.length === 0
                   ? "採点する回答を選んでください"
-                  : alreadyPicked
-                    ? `選び直して送信（${selected.length}件）`
-                    : `この順位で採点する（${selected.length}件）`}
+                  : late
+                    ? `この順位で採点して結果を見る（${selected.length}件）`
+                    : alreadyPicked
+                      ? `選び直して送信（${selected.length}件）`
+                      : `この順位で採点する（${selected.length}件）`}
             </button>
             {alreadyPicked && (
               <p className="text-xs text-muted">
@@ -431,6 +442,7 @@ function PickForm({
             </button>
             <p className="text-xs text-muted">
               面白い回答が無かったときはこちら。採点は0件のまま終えたことになります。
+              {late && " 送ると結果が見られます。"}
             </p>
             <ErrorText message={skipState.error} />
           </form>

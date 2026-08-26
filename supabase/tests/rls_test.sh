@@ -538,6 +538,92 @@ eq   "一度 claim したら二度と出てこない（二重送信しない）"
 root_eq "closed_notified_at が入る" "t" "select (closed_notified_at is not null) from odai where id=$O_NOTIFY;"
 
 echo
+echo "== 結果発表後の採点（0022） =="
+# 発表後でも「発表前に解禁していて、まだ採点していない人」は採点できる。
+# ただし採点するまで結果（誰が書いたか・誰が誰を選んだか）は見えない。
+ok   "alice が発表後採点テスト用のお題を作る" $ALICE \
+     "insert into odai (author_id, text) values ('$ALICE', '発表後の採点');"
+O_LATE=$($PSQL -c "select id from odai where text='発表後の採点';")
+
+ok   "bob が回答" $BOB "insert into answers (odai_id, author_id, text) values ($O_LATE,'$BOB','bobの回答');"
+ok   "erin が回答" $ERIN "insert into answers (odai_id, author_id, text) values ($O_LATE,'$ERIN','erinの回答');"
+LT_B=$($PSQL -c "select id from answers where odai_id=$O_LATE and author_id='$BOB';")
+LT_E=$($PSQL -c "select id from answers where odai_id=$O_LATE and author_id='$ERIN';")
+
+ok   "bob が解禁して採点" $BOB \
+     "select unlock_answers($O_LATE); select submit_picks($O_LATE, array[$LT_E]::bigint[]);"
+ok   "erin が解禁して採点" $ERIN \
+     "select unlock_answers($O_LATE); select submit_picks($O_LATE, array[$LT_B]::bigint[]);"
+# carol と dave は解禁だけして採点しない（実測で48%を占めた状態）。
+ok   "carol が解禁だけする（採点しない）" $CAROL "select unlock_answers($O_LATE);"
+ok   "dave が解禁だけする（採点しない）"  $DAVE  "select unlock_answers($O_LATE);"
+ok   "出題者が締め切る" $ALICE "select close_odai($O_LATE);"
+eq   "お題は発表済み" "closed" $ALICE "select phase from odai where id=$O_LATE;"
+
+echo
+echo "-- 採点していない人には、発表後もまだ結果が見えない --"
+eq   "carol には作者名がまだ伏せられている" "0" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+eq   "carol には他人の採点も見えない" "0" $CAROL \
+     "select count(*) from picks where odai_id=$O_LATE;"
+eq   "回答本文そのものは見える（伏せるのは作者名だけ）" "2" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_LATE;"
+
+echo
+echo "-- 一方、参加していない人・採点済みの人には今まで通りすぐ見える --"
+eq   "解禁していない alice には作者名が見える" "2" $ALICE \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+eq   "採点済みの bob には作者名が見える" "2" $BOB \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+eq   "採点済みの bob には他人の採点も見える" "2" $BOB \
+     "select count(*) from picks where odai_id=$O_LATE;"
+
+echo
+echo "-- carol は発表後でも採点できる。採点した瞬間に結果が見える --"
+ok   "carol が発表後に採点する" $CAROL \
+     "select submit_picks($O_LATE, array[$LT_B]::bigint[]);"
+root_eq "carol の採点が実際に入っている" "1" \
+     "select count(*) from picks where odai_id=$O_LATE and voter_id='$CAROL';"
+eq   "採点したので carol にも作者名が見える" "2" $CAROL \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+eq   "採点したので carol にも他人の採点が見える" "3" $CAROL \
+     "select count(*) from picks where odai_id=$O_LATE;"
+
+echo
+echo "-- dave は採点せずに結果を見る。見たら以後そのお題には採点できない（片道切符） --"
+eq   "見る前の dave には作者名が伏せられている" "0" $DAVE \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+ok   "dave が「採点せずに結果を見る」を選ぶ" $DAVE "select reveal_results($O_LATE);"
+eq   "見たあとの dave には作者名が見える" "2" $DAVE \
+     "select count(*) from answers_view where odai_id=$O_LATE and author_id is not null;"
+deny "結果を見た dave はもう採点できない" $DAVE \
+     "select submit_picks($O_LATE, array[$LT_B]::bigint[]);"
+deny "結果を見た dave は「何も選ばない」も宣言できない" $DAVE \
+     "select submit_picks($O_LATE, array[]::bigint[]);"
+
+echo
+echo "-- 一覧に出す「まだ採点できる発表済みのお題」 --"
+eq   "採点も閲覧もしていない人だけに出る（いまは誰もいない）" "0" $CAROL \
+     "select count(*) from my_scoreable_closed_odai() where odai_id=$O_LATE;"
+eq   "結果を見た dave にも出ない" "0" $DAVE \
+     "select count(*) from my_scoreable_closed_odai() where odai_id=$O_LATE;"
+eq   "そもそも解禁していない alice にも出ない" "0" $ALICE \
+     "select count(*) from my_scoreable_closed_odai() where odai_id=$O_LATE;"
+
+echo
+echo "-- 既存の発表済みお題は全員「もう見た」で埋めてある（migration 0022 §3） --"
+# このお題より前に closed になったものは、誰が見たか分からないので安全側に倒してある。
+root_eq "解禁済み × closed の組はすべて reveal 済みか、発表後に採点している" "0" \
+     "select count(*) from answer_unlocks k
+        join odai o on o.id = k.odai_id and o.phase = 'closed'
+       where not exists (select 1 from result_reveals r
+                          where r.odai_id = k.odai_id and r.user_id = k.user_id)
+         and not exists (select 1 from picks p
+                          where p.odai_id = k.odai_id and p.voter_id = k.user_id)
+         and not exists (select 1 from pick_skips s
+                          where s.odai_id = k.odai_id and s.voter_id = k.user_id);"
+
+echo
 echo "== 仕様書 §8 の導出クエリ =="
 
 echo "(A) 選好ペア（先頭5件）:"

@@ -89,6 +89,19 @@ export type PickSkip = {
 };
 
 /**
+ * result_reveals の行。「このお題の結果を見た」という宣言（0022）。
+ *
+ * answer_unlocks と同じ片道切符で、入った時点からそのお題には採点できなくなる。
+ * 発表後の採点を許すのに「見る前か後か」で分けているのは、汚染の原因が
+ * 「いつ採点したか」ではなく「採点する時点で何が見えていたか」だから。
+ */
+export type ResultReveal = {
+  odai_id: number;
+  user_id: string;
+  revealed_at: string;
+};
+
+/**
  * odai_close_progress() の行。open のお題1件ぶんの「結果発表までの進捗」。
  *
  * 中身は全部集計値で、誰が何を書いたか・誰が誰を選んだかは含まない
