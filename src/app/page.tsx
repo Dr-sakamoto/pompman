@@ -42,6 +42,7 @@ export default async function HomePage() {
     { data: countRows },
     { data: unlockRows },
     { data: myPicks },
+    { data: revealRows },
     { data: progressRows },
     { data: closeRows },
     { data: streakRows },
@@ -57,6 +58,9 @@ export default async function HomePage() {
     // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
     supabase.from("answer_unlocks").select("odai_id, user_id"),
     supabase.from("picks").select("odai_id, voter_id"),
+    // 結果を見た（＝もう採点できない）お題。自分の行しか返らない。
+    // 発表済みでも、ここに無いお題はまだ伏せたまま採点できる（0023）。
+    supabase.from("result_reveals").select("odai_id, user_id"),
     supabase.rpc("ai_progress_stats"),
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     supabase.rpc("odai_close_progress"),
@@ -80,6 +84,9 @@ export default async function HomePage() {
   );
   const scored = new Set(
     (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
+  );
+  const revealed = new Set(
+    (revealRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
   );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
   const closeProgress = new Map(
@@ -133,7 +140,10 @@ export default async function HomePage() {
                 const progress = closeProgress.get(o.id);
                 const todo =
                   o.phase !== "open"
-                    ? null
+                    ? // 発表済みでも、結果を見ていなければ伏せたまま採点できる（0023）
+                      !revealed.has(o.id)
+                      ? "未採点"
+                      : null
                     : mine === 0
                       ? "未回答"
                       : !isUnlocked

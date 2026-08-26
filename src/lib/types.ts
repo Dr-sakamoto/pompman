@@ -79,6 +79,11 @@ export type Pick = {
   answer_id: number;
   rank: number;
   created_at: string;
+  /**
+   * 結果発表後に（名前を伏せたまま）付けられた採点か（0023）。
+   * 発表前の採点と混ぜたまま保存すると二度と分離できないので、行そのものに持たせてある。
+   */
+  after_close: boolean;
 };
 
 /** pick_skips の行。「面白い回答が無かった」という明示的な採点終了の宣言。 */
@@ -86,6 +91,8 @@ export type PickSkip = {
   odai_id: number;
   voter_id: string;
   created_at: string;
+  /** 結果発表後に宣言された「選ぶ回答なし」か（0023）。 */
+  after_close: boolean;
 };
 
 /**
