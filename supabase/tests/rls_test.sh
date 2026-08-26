@@ -484,6 +484,15 @@ eq   "採点できない人は解禁だけで finished（分子は1）" "1" $ERI
      "select finished from odai_close_progress() where odai_id=$O_SOLO;"
 eq   "ただし採点はしていないので judged は0（時間バーは「採点待ち」になる）" "0" $ERIN \
      "select judged from odai_close_progress() where odai_id=$O_SOLO;"
+
+# 選べる回答が0件でも「何も選ばない」は明示的に送れる（0022）。これが無いと、
+# 無回答で解禁した人は自動 finished 扱いになるだけで pick_skips に行が残らず、
+# 結果発表後の「採点した人」表示や貢献度ランキングに一切現れない。
+ok   "選べる回答が無くても『何も選ばない』は送れる" $ERIN \
+     "select submit_picks($O_SOLO, array[]::bigint[]);"
+eq   "明示的に skip すれば judged にも数えられる" "1" $ERIN \
+     "select judged from odai_close_progress() where odai_id=$O_SOLO;"
+
 eq   "それでも参加者は1人なので発表されない" "open" $ERIN "select phase from odai where id=$O_SOLO;"
 
 echo
