@@ -32,6 +32,9 @@ UI の完成度は妥協していいが、DB に残る情報の解像度は妥�
 大喜利の先（間・音源・照明のデータ化 → デジタル・プレ・リハーサル → ネタAI）の順路は
 [`docs/neta-ai-roadmap.md`](docs/neta-ai-roadmap.md)。構想そのものは [`docs/comedy-ai-design.md`](docs/comedy-ai-design.md)。
 
+本番のログを数えて「どこで人が落ちているか」と、その手当ての案をまとめたものが
+[`docs/engagement-ideas.md`](docs/engagement-ideas.md)。効果の測り方（SQL）も同じ文書にある。
+
 ## 技術構成
 
 | 項目 | 選定 |
@@ -122,6 +125,18 @@ Edge Function を再デプロイし、`auth.users` / `auth.identities` とアプ
 
 `supabase/migrations/` の中身を**番号順に**すべて SQL Editor に貼って実行する。
 Supabase CLI を使うなら `supabase db push`。
+
+> **これは初回だけの作業ではない。** マイグレーションを流す CI は無いので、
+> **PR をマージしても本番の DB は変わらない**。DB を触る PR を出した後は、
+> 必ず本番にも流すこと。実際に何本も流し忘れて、「何も選ばない」「回答なしで採点に進む」
+> 「採点2人未満は発表しない」が本番で動いていない状態が続いている
+> （[`docs/engagement-ideas.md`](docs/engagement-ideas.md) §2）。
+>
+> ズレの確認は SQL Editor で1行:
+>
+> ```sql
+> select version, name from supabase_migrations.schema_migrations order by version;
+> ```
 
 ### 3. Auth の設定
 
