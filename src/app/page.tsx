@@ -42,10 +42,10 @@ export default async function HomePage() {
     { data: countRows },
     { data: unlockRows },
     { data: myPicks },
+    { data: revealRows },
     { data: progressRows },
     { data: closeRows },
     { data: streakRows },
-    { data: scoreableRows },
   ] = await Promise.all([
     requireMember(),
     supabase.from("odai").select("*").order("created_at", { ascending: false }),
@@ -58,14 +58,14 @@ export default async function HomePage() {
     // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
     supabase.from("answer_unlocks").select("odai_id, user_id"),
     supabase.from("picks").select("odai_id, voter_id"),
+    // 結果を見た（＝もう採点できない）お題。自分の行しか返らない。
+    // 発表済みでも、ここに無いお題はまだ伏せたまま採点できる（0023）。
+    supabase.from("result_reveals").select("odai_id, user_id"),
     supabase.rpc("ai_progress_stats"),
     // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
     supabase.rpc("odai_close_progress"),
     // 連続参加日数（回答 or 採点）。自分の行しか返らないので誰かに見せる情報ではない。
     supabase.rpc("my_streak"),
-    // 発表済みだが自分はまだ採点できるお題（0023）。自動解禁のまま採点されずに
-    // 発表まで行ったぶんが、ここに出てくる。
-    supabase.rpc("my_scoreable_closed_odai"),
   ]);
 
   const odai = (odaiRows ?? []) as Odai[];
@@ -85,14 +85,14 @@ export default async function HomePage() {
   const scored = new Set(
     (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
   );
+  const revealed = new Set(
+    (revealRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
+  );
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
   const closeProgress = new Map(
     ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
   );
   const streak = (streakRows?.[0] ?? { streak_days: 0, last_active_date: null }) as StreakStats;
-  const scoreableClosed = new Set(
-    ((scoreableRows ?? []) as { odai_id: number }[]).map((r) => Number(r.odai_id)),
-  );
 
   return (
     <div className="space-y-8">
@@ -140,9 +140,9 @@ export default async function HomePage() {
                 const progress = closeProgress.get(o.id);
                 const todo =
                   o.phase !== "open"
-                    ? // 発表済みでも、まだ採点していない人には採点の余地が残っている（0023）
-                      scoreableClosed.has(o.id)
-                      ? "採点できます"
+                    ? // 発表済みでも、結果を見ていなければ伏せたまま採点できる（0023）
+                      !revealed.has(o.id)
+                      ? "未採点"
                       : null
                     : mine === 0
                       ? "未回答"

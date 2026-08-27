@@ -305,11 +305,9 @@ export async function unlockAnswers(_prev: ActionState, formData: FormData): Pro
 }
 
 /**
- * 採点せずに結果を見る（0023）。片道切符で、以後そのお題には採点できなくなる。
- *
- * 発表後に採点できるのは「発表前に解禁していて、まだ結果を見ていない人」だけ。
- * 見てからの採点は「誰が書いたか」「他人が何を選んだか」を知った上の選択になり、
- * picks が人気投票・同調ログに化ける（README §4.3）。判定は DB 側。
+ * 採点せずに結果（回答者名・全員の採点）を開ける。片道切符で、以後そのお題は
+ * 採点できなくなる（判定は DB 側。0023）。結果を見てから付けた順位は、
+ * 他人に合わせただけの記録に化けるので受け付けない。
  */
 export async function revealResults(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const odaiId = Number(formData.get("odai_id"));

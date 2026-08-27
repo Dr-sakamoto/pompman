@@ -14,10 +14,9 @@
 -- 単位として扱っているのと揃える。
 -- ============================================================================
 
--- 返り値に pick_count を足すので、create or replace では置き換えられない
--- （OUT パラメータが変わると「cannot change return type of existing function」）。
--- 0021 の odai_close_progress() と同じく drop してから作り直す。
--- drop で権限が落ちるので、末尾で grant を張り直している。
+-- 返り値の列（OUT パラメータ）が変わるので create or replace では置き換えられない
+-- （0019_min_scoring_to_close.sql の odai_close_progress() と同じ理由）。
+-- drop すると 0016 で付けた grant も落ちるので、末尾で付け直す。
 drop function if exists public.contribution_ranking();
 
 create function public.contribution_ranking()

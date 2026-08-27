@@ -79,6 +79,11 @@ export type Pick = {
   answer_id: number;
   rank: number;
   created_at: string;
+  /**
+   * 結果発表後に（名前を伏せたまま）付けられた採点か（0023）。
+   * 発表前の採点と混ぜたまま保存すると二度と分離できないので、行そのものに持たせてある。
+   */
+  after_close: boolean;
 };
 
 /** pick_skips の行。「面白い回答が無かった」という明示的な採点終了の宣言。 */
@@ -86,19 +91,8 @@ export type PickSkip = {
   odai_id: number;
   voter_id: string;
   created_at: string;
-};
-
-/**
- * result_reveals の行。「このお題の結果を見た」という宣言（0023）。
- *
- * answer_unlocks と同じ片道切符で、入った時点からそのお題には採点できなくなる。
- * 発表後の採点を許すのに「見る前か後か」で分けているのは、汚染の原因が
- * 「いつ採点したか」ではなく「採点する時点で何が見えていたか」だから。
- */
-export type ResultReveal = {
-  odai_id: number;
-  user_id: string;
-  revealed_at: string;
+  /** 結果発表後に宣言された「選ぶ回答なし」か（0023）。 */
+  after_close: boolean;
 };
 
 /**
