@@ -4,6 +4,7 @@ import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { CloseProgressRow, Odai, Phase } from "@/lib/types";
 import { PHASE_LABEL } from "@/lib/types";
+import { revealGate } from "@/lib/reveal";
 import { PhaseBadge, TodoBadge } from "@/components/ui";
 import { AiProgress } from "@/components/AiProgress";
 import { CloseProgress } from "@/components/CloseProgress";
@@ -42,7 +43,7 @@ export default async function HomePage() {
     { data: countRows },
     { data: unlockRows },
     { data: myPicks },
-    { data: revealRows },
+    { data: revealRows, error: revealError },
     { data: progressRows },
     { data: closeRows },
     { data: streakRows },
@@ -85,9 +86,9 @@ export default async function HomePage() {
   const scored = new Set(
     (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
   );
-  const revealed = new Set(
-    (revealRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
-  );
+  // 読めなかったとき（0023 が本番 DB に未適用）は「見た」に倒す。後追い採点そのものが
+  // 効いていないので、「未採点」バッジを出しても行き止まりに送るだけになる。
+  const revealed = revealGate(revealRows, revealError, user.id);
   const picksCount = progressRows?.[0]?.picks_count ?? 0;
   const closeProgress = new Map(
     ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
@@ -141,7 +142,7 @@ export default async function HomePage() {
                 const todo =
                   o.phase !== "open"
                     ? // 発表済みでも、結果を見ていなければ伏せたまま採点できる（0023）
-                      !revealed.has(o.id)
+                      !revealed(o.id)
                       ? "未採点"
                       : null
                     : mine === 0

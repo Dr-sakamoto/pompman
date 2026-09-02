@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import type { AnswerView, AppUser, CloseProgressRow, Odai, Pick, PickSkip } from "@/lib/types";
+import { revealGate } from "@/lib/reveal";
 import { PhaseBadge } from "@/components/ui";
 import { CloseProgress } from "@/components/CloseProgress";
 import { OpenPhase } from "./OpenPhase";
@@ -42,7 +43,7 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     { data: userRows },
     { data: countRows },
     { data: unlockRows },
-    { data: revealRows },
+    { data: revealRows, error: revealError },
     { data: progressRows },
   ] = await Promise.all([
     requireMember(),
@@ -85,7 +86,8 @@ export default async function OdaiPage({ params }: { params: Promise<{ id: strin
     )?.answer_count ?? 0;
   const unlocked = (unlockRows ?? []).some((r) => r.user_id === user.id);
   // 結果を見た人＝もう採点できない人。見ていなければ、発表済みでも伏せたまま採点できる。
-  const revealed = (revealRows ?? []).some((r) => r.user_id === user.id);
+  // 読めなかったとき（0023 が本番 DB に未適用）は結果を見せる側に倒す（src/lib/reveal.ts）。
+  const revealed = revealGate(revealRows, revealError, user.id)(odaiId);
   const isOwner = odai.author_id === user.id;
   const progress =
     ((progressRows ?? []) as CloseProgressRow[]).find((r) => Number(r.odai_id) === odaiId) ?? null;
