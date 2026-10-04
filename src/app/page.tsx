@@ -1,118 +1,41 @@
 import Link from "next/link";
-import { after } from "next/server";
 import { requireMember } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
-import type { CloseProgressRow, Odai, Phase } from "@/lib/types";
-import { PHASE_LABEL } from "@/lib/types";
-import { revealGate } from "@/lib/reveal";
-import { PhaseBadge, TodoBadge } from "@/components/ui";
-import { AiProgress } from "@/components/AiProgress";
-import { CloseProgress } from "@/components/CloseProgress";
-import { PushSubscribeToggle } from "@/components/PushSubscribeToggle";
-import { notifyNewlyClosedOdai } from "@/lib/push/notify";
-import { StreakBadge } from "@/components/StreakBadge";
-import type { StreakStats } from "@/lib/types";
+import { StartForm } from "./play/StartForm";
 
-const SECTIONS: Phase[] = ["open", "closed"];
+// お題を出すと、その場で AI が最初の10個を考える（Server Action はこのページの設定で動く）。
+export const maxDuration = 120;
+
+type SessionRow = {
+  id: number;
+  odai_text: string;
+  created_at: string;
+  ogiri_rounds: { ogiri_candidates: { picked: boolean }[] }[];
+};
 
 export default async function HomePage() {
   const supabase = await createClient();
-
-  /*
-   * requireMember() と一覧系のクエリは互いの結果に依存していないので、
-   * 直列に待たず同時に投げる。
-   */
-  /*
-   * 自動解禁・自動締め切りのうち「時間が経った」で決まるぶんは、DB 側に引き金に
-   * なるイベントが無い（誰かが INSERT するとは限らない）ので、表示のたびに掃除する。
-   *
-   * 下のクエリと同時に投げると掃除の結果が今回の描画に間に合わず、解禁されたのに
-   * 伏せられたままの画面を1回見せてしまう。ここは1往復ぶん先に待つ。Supabase も
-   * Vercel も東京にあるのでこの往復は数ミリ秒で、README が問題にしている
-   * 「端末 ↔ サーバー」の往復とは桁が違う。
-   */
-  await supabase.rpc("sweep_odai_deadlines");
-  // 時間経過だけで closed へ進むぶんは、これを叩いた人以外は誰も気づけない
-  // （0017 参照）。ページ本体の応答を遅らせないよう、応答後にまわす。
-  after(() => notifyNewlyClosedOdai());
-
-  const [
-    { user },
-    { data: odaiRows },
-    { data: myAnswers },
-    { data: countRows },
-    { data: unlockRows },
-    { data: myPicks },
-    { data: revealRows, error: revealError },
-    { data: progressRows },
-    { data: closeRows },
-    { data: streakRows },
-  ] = await Promise.all([
+  const [{ user }, { data }] = await Promise.all([
     requireMember(),
-    supabase.from("odai").select("*").order("created_at", { ascending: false }),
-    // 自分の回答はいつでも読める（他人の回答は自分が解禁するまで読めない）。
-    supabase.from("answers_view").select("odai_id").eq("is_mine", true),
-    // 回答数は件数だけなので、まだ回答していないお題の分も出る。
-    supabase.rpc("odai_answer_counts"),
-    // RLS により、結果発表前は自分の行しか返らない。user_id / voter_id での絞り込みは
-    // 受け取ってから行う（requireMember() の結果である user.id を、それがまだ
-    // 解決していないこの Promise.all の中で参照するわけにはいかないため）。
-    supabase.from("answer_unlocks").select("odai_id, user_id"),
-    supabase.from("picks").select("odai_id, voter_id"),
-    // 結果を見た（＝もう採点できない）お題。自分の行しか返らない。
-    // 発表済みでも、ここに無いお題はまだ伏せたまま採点できる（0023）。
-    supabase.from("result_reveals").select("odai_id, user_id"),
-    supabase.rpc("ai_progress_stats"),
-    // 結果発表までの進捗（人数・時間）。集計値だけなので未回答・未解禁でも見える。
-    supabase.rpc("odai_close_progress"),
-    // 連続参加日数（回答 or 採点）。自分の行しか返らないので誰かに見せる情報ではない。
-    supabase.rpc("my_streak"),
+    supabase
+      .from("ogiri_sessions")
+      .select("id, odai_text, created_at, ogiri_rounds(ogiri_candidates(picked))")
+      .order("created_at", { ascending: false })
+      .limit(50),
   ]);
-
-  const odai = (odaiRows ?? []) as Odai[];
-  const myAnswerCount = new Map<number, number>();
-  for (const a of (myAnswers ?? []) as { odai_id: number }[]) {
-    myAnswerCount.set(a.odai_id, (myAnswerCount.get(a.odai_id) ?? 0) + 1);
-  }
-  const answerCount = new Map(
-    ((countRows ?? []) as { odai_id: number; answer_count: number }[]).map((r) => [
-      r.odai_id,
-      Number(r.answer_count),
-    ]),
-  );
-  const unlocked = new Set(
-    (unlockRows ?? []).filter((r) => r.user_id === user.id).map((r) => r.odai_id as number),
-  );
-  const scored = new Set(
-    (myPicks ?? []).filter((p) => p.voter_id === user.id).map((p) => p.odai_id as number),
-  );
-  // 読めなかったとき（0023 が本番 DB に未適用）は「見た」に倒す。後追い採点そのものが
-  // 効いていないので、「未採点」バッジを出しても行き止まりに送るだけになる。
-  const revealed = revealGate(revealRows, revealError, user.id);
-  const picksCount = progressRows?.[0]?.picks_count ?? 0;
-  const closeProgress = new Map(
-    ((closeRows ?? []) as CloseProgressRow[]).map((r) => [Number(r.odai_id), r]),
-  );
-  const streak = (streakRows?.[0] ?? { streak_days: 0, last_active_date: null }) as StreakStats;
+  const sessions = (data ?? []) as SessionRow[];
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <span className="flex items-center gap-2">
-          <p className="text-sm text-muted">{user.handle} さん</p>
-          <StreakBadge streak={streak} />
-        </span>
-        <Link
-          href="/odai/new"
-          className="rounded-md bg-accent px-4 py-2 text-sm font-bold text-ink"
-        >
-          お題を出す
-        </Link>
+      <div className="space-y-1">
+        <p className="text-sm text-muted">{user.handle} さん</p>
+        <h1 className="text-2xl font-bold">AIが10個出す。あなたは選ぶだけ。</h1>
+        <p className="text-sm text-muted">
+          面白いと思った回答を選ぶほど、次の10個があなたのツボに寄っていきます。
+        </p>
       </div>
 
-      <PushSubscribeToggle />
-
-      <AiProgress picksCount={picksCount} />
+      <StartForm />
 
       {user.role === "admin" && (
         <Link href="/invites" className="block text-sm text-muted hover:text-white">
@@ -120,65 +43,30 @@ export default async function HomePage() {
         </Link>
       )}
 
-      {odai.length === 0 && (
-        <p className="text-sm text-muted">
-          まだお題がありません。最初の1つを出してください。
-        </p>
+      {sessions.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-bold text-muted">これまでのお題</h2>
+          <ul className="space-y-2">
+            {sessions.map((s) => {
+              const candidates = s.ogiri_rounds.flatMap((r) => r.ogiri_candidates);
+              const picked = candidates.filter((c) => c.picked).length;
+              return (
+                <li key={s.id}>
+                  <Link
+                    href={`/play/${s.id}`}
+                    className="block rounded-lg border border-line bg-panel p-4 transition hover:border-white/25"
+                  >
+                    <p className="font-medium">{s.odai_text}</p>
+                    <p className="mt-1 text-xs text-muted">
+                      {s.ogiri_rounds.length}回 ・ {candidates.length}個中 {picked}個 選んだ
+                    </p>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
-
-      {SECTIONS.map((phase) => {
-        const rows = odai.filter((o) => o.phase === phase);
-        if (rows.length === 0) return null;
-
-        return (
-          <section key={phase} className="space-y-2">
-            <h2 className="text-sm font-bold text-muted">{PHASE_LABEL[phase]}</h2>
-            <ul className="space-y-2">
-              {rows.map((o) => {
-                const count = answerCount.get(o.id) ?? 0;
-                const mine = myAnswerCount.get(o.id) ?? 0;
-                const isUnlocked = unlocked.has(o.id);
-                const progress = closeProgress.get(o.id);
-                const todo =
-                  o.phase !== "open"
-                    ? // 発表済みでも、結果を見ていなければ伏せたまま採点できる（0023）
-                      !revealed(o.id)
-                      ? "未採点"
-                      : null
-                    : mine === 0
-                      ? "未回答"
-                      : !isUnlocked
-                        ? // 他人の回答が1つも無いうちは解禁を急かさない
-                          count > mine
-                          ? "解禁できます"
-                          : null
-                        : !scored.has(o.id)
-                          ? "未採点"
-                          : null;
-
-                return (
-                  <li key={o.id}>
-                    <Link
-                      href={`/odai/${o.id}`}
-                      className={`block rounded-lg border bg-panel p-4 transition hover:border-white/25 ${
-                        todo ? "border-accent/60" : "border-line"
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center gap-2">
-                        <PhaseBadge phase={o.phase} />
-                        {todo && <TodoBadge>{todo}</TodoBadge>}
-                        <span className="ml-auto text-xs text-muted">回答 {count}件</span>
-                      </div>
-                      <p className="font-medium">{o.text}</p>
-                      {progress && <CloseProgress progress={progress} className="mt-3" />}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        );
-      })}
     </div>
   );
 }

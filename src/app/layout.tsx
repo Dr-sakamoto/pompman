@@ -10,7 +10,7 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "大喜利",
-  description: "身内で遊ぶ招待制の大喜利アプリ。リンクから開いてホーム画面に追加できます。",
+  description: "AIが出す10個の回答から面白いものを選ぶだけの大喜利アプリ。選ぶほど回答があなたのツボに寄っていきます。",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "大喜利",
-    description: "身内で遊ぶ招待制の大喜利アプリ",
+    description: "AIが出す大喜利の回答から、面白いものを選ぶだけ",
     url: siteUrl,
     siteName: "大喜利",
     locale: "ja_JP",
@@ -56,9 +56,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 大喜利
               </Link>
               <div className="flex items-center gap-4">
-                <Link href="/ranking" className="text-sm text-muted hover:text-white">
-                  ランキング
-                </Link>
                 <Link href="/members" className="text-sm text-muted hover:text-white">
                   メンバー
                 </Link>

@@ -676,5 +676,25 @@ echo "(D) 「解禁後に書かれた回答」が無いことの検証（0件で
 $PSQL -c "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
 
 echo
+echo "== 0024: AI が10個出して選ぶ =="
+ok   "本人としてセッションを始められる"        $ALICE "insert into ogiri_sessions(user_id, odai_text) values ('$ALICE', 'こんな校長は嫌だ');"
+deny "他人名義のセッションは作れない"          $BOB   "insert into ogiri_sessions(user_id, odai_text) values ('$ALICE', 'なりすまし');"
+deny "ラウンドを直接 INSERT できない"          $ALICE "insert into ogiri_rounds(session_id, round_no, model) values (1, 1, 'x');"
+deny "他人のセッションにラウンドを足せない"    $BOB   "select add_ogiri_round(1, 'm', 'n', array['a','b']);"
+ok   "1回目の10個を保存できる"                 $ALICE "select add_ogiri_round(1, 'm', '初回', array['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10']);"
+deny "未提出のまま次のラウンドは出せない"      $ALICE "select add_ogiri_round(1, 'm', 'n', array['b1']);"
+eq   "他人には候補が見えない"            "0"   $BOB   "select count(*) from ogiri_candidates;"
+deny "他人のラウンドは提出できない"            $BOB   "select submit_ogiri_picks(1, array[1,2]::bigint[]);"
+deny "候補の picked を直接書き換えられない"    $ALICE "update ogiri_candidates set picked = true where id = 3;"
+ok   "選んだものを提出できる"                  $ALICE "select submit_ogiri_picks(1, array[1,3]::bigint[]);"
+eq   "選んだ2つだけ picked になる"       "2"   $ALICE "select count(*) from ogiri_candidates where picked;"
+deny "提出済みラウンドは選び直せない"          $ALICE "select submit_ogiri_picks(1, array[2]::bigint[]);"
+ok   "提出後は次のラウンドを出せる"            $ALICE "select add_ogiri_round(1, 'm', 'n', array['b1','b2']);"
+ok   "Bob も別のお題で遊ぶ"                    $BOB   "insert into ogiri_sessions(user_id, odai_text) values ('$BOB', '別のお題');"
+eq   "Bob の手本に Alice の選択が名前抜きで入る" "こんな校長は嫌だ|a1|f" $BOB "select odai_text, answer, is_mine from ogiri_taste_examples(2, 40) order by answer limit 1;"
+eq   "自分のセッションは手本から除く"    "0"   $ALICE "select count(*) from ogiri_taste_examples(1, 40);"
+deny "anon は手本を読めない"                   ""     "set role anon; select * from ogiri_taste_examples(1, 40);"
+
+echo
 echo "================ pass=$pass fail=$fail ================"
 [ $fail -eq 0 ]
