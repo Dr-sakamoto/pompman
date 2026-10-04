@@ -676,7 +676,7 @@ echo "(D) 「解禁後に書かれた回答」が無いことの検証（0件で
 $PSQL -c "select count(*) from answers a join answer_unlocks u on u.odai_id = a.odai_id and u.user_id = a.author_id where a.created_at > u.unlocked_at;"
 
 echo
-echo "== 0024: 週1お題 × AI 大量生成 × 審査役 =="
+echo "== 0024: 週1お題・相談 × AI 大量生成 × 審査役 =="
 eq   "今週のお題が決まる"                  "1"    $ALICE "select count(*) from ensure_weekly_odai();"
 eq   "2回呼んでも同じお題"                 "1"    $BOB   "select id from ensure_weekly_odai();"
 deny "anon は今週のお題を決められない"            ""     "set role anon; select * from ensure_weekly_odai();"
@@ -686,7 +686,7 @@ deny "他人の札では保存できない"                   $BOB   "select fin
 deny "点の数が合わないと保存できない"             $ALICE "select finish_ai_batch(1, 'g', 'j', array['x','y'], array[50]);"
 eq   "12個を点つきで保存できる"            "12"   $ALICE "select finish_ai_batch(1, 'g', 'j', array['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10','a11','a12'], array[90,85,70,60,50,40,30,20,10,5,3,1]);"
 eq   "メンバーなら AI の回答を読める"      "12"   $BOB   "select count(*) from ai_answers;"
-deny "AI の回答を直接 INSERT できない"            $BOB   "insert into ai_answers(weekly_odai_id, batch_id, text) values (1, 1, 'x');"
+deny "AI の回答を直接 INSERT できない"            $BOB   "insert into ai_answers(ai_odai_id, batch_id, text) values (1, 1, 'x');"
 ok   "Alice が10個を確保できる"                   $ALICE "select create_ai_set(1, array[1,2,3,4,5,6,7,8,9,10]::bigint[], array['top','top','top','top','top','top','top','top','explore','explore'], array[.9,.85,.7,.6,.5,.4,.3,.2,.1,.05]::real[]);"
 deny "選び終えるまで次の10個は作れない"           $ALICE "select create_ai_set(1, array[11]::bigint[], array['top'], array[.1]::real[]);"
 eq   "他人の10個は見えない"                "0"    $BOB   "select count(*) from ai_set_items;"
@@ -702,7 +702,25 @@ eq   "上位枠の当たり"                      "8|2"  $BOB   "select top_show
 eq   "審査役の一致率（15/16）"             "0.9375" $BOB "select judge_pair_acc from ai_weekly_stats() limit 1;"
 eq   "今週の殿堂はまだ見えない"            "0"    $BOB   "select count(*) from ai_hall_of_fame(1);"
 eq   "今週は過去の手本に入らない"          "0"    $BOB   "select count(*) from ai_past_examples(1);"
-eq   "過去の週としてなら手本に入る"        "2"    $BOB   "select count(*) from ai_past_examples(-1);"
+eq   "過去のお題としてなら手本に入る（勝ち2・負け8）" "2|8" $BOB "select count(*) filter (where picked_count > 0), count(*) filter (where picked_count = 0) from ai_past_examples(-1);"
+
+echo "-- 相談（本人だけのお題） --"
+eq   "相談を始められる"                    "2"    $BOB   "select create_consult('漫才のツカミで、自己紹介の一言');"
+deny "空の相談は始められない"                     $BOB   "select create_consult('   ');"
+eq   "相談のお題は本人に見える"            "1"    $BOB   "select count(*) from ai_odai where kind = 'consult';"
+eq   "相談のお題は他人には見えない"        "0"    $ALICE "select count(*) from ai_odai where kind = 'consult';"
+deny "他人の相談で生成の札は取れない"             $ALICE "select claim_ai_batch(2);"
+eq   "本人は相談の札を取れる"              "2"    $BOB   "select claim_ai_batch(2);"
+eq   "相談の回答を保存"                    "3"    $BOB   "select finish_ai_batch(2, 'g', 'j', array['c1','c2','c3'], array[80,50,20]);"
+eq   "相談の回答は他人に見えない"          "12"   $ALICE "select count(*) from ai_answers;"
+eq   "他人には相談の集計も出ない"          "0"    $ALICE "select count(*) from ai_answer_pool(2);"
+deny "他人の相談で10個は作れない"                 $ALICE "select create_ai_set(2, array[13]::bigint[], array['top'], array[.5]::real[]);"
+ok   "本人は相談の10個を作れる"                   $BOB   "select create_ai_set(2, array[13,14,15]::bigint[], array['top','top','explore'], array[.8,.5,.2]::real[]);"
+ok   "本人が相談で選ぶ"                           $BOB   "select submit_ai_set((select id from ai_sets where ai_odai_id = 2), array[13]::bigint[]);"
+eq   "相談の選択も審査役の手本に入る"      "c1"   $ALICE "select answer from ai_past_examples(1) where picked_count > 0;"
+eq   "週の成績には相談を混ぜない"          "1"    $BOB   "select count(*) from ai_weekly_stats();"
+$PSQL -c "insert into ai_odai(kind, owner_id, text) select 'consult', '$CAROL', 'x' || g from generate_series(1, 30) g;" > /dev/null
+deny "相談は1日30件まで"                          $CAROL "select create_consult('31件目');"
 
 echo
 echo "================ pass=$pass fail=$fail ================"

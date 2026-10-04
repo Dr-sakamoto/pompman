@@ -18,6 +18,15 @@
 -- 選ばれなかった回答も消さない。同じ10個の中の「選んだ > 選ばなかった」が
 -- 選好ペアになり、審査役を鍛える教材になる（0001 からの方針）。
 --
+-- お題には2種類ある（ai_odai.kind）:
+--
+--   weekly  … 週1回の全員共通のお題。全員で選んで、目利きのデータを貯める側
+--   consult … 1人が好きなときに出す「相談」。ネタで欲しいボケを大喜利のお題の形にして投げ、
+--             貯まった目利き（審査役）で絞った10個を受け取る側。本人にしか見えない
+--
+-- どちらも「大量に書く → 審査役が採点 → 上から10個 → 選ぶ」の同じ流れに乗る。
+-- 相談で本人が選んだ／選ばなかったも、審査役の手本として同じように貯まる。
+--
 -- 旧来の odai / answers / picks には一切手を付けない。odai はお題ストックとして読むだけ。
 --
 -- ※ このファイルは、マージ前の下書き（ogiri_sessions 等。1人が好きなお題で遊ぶ形）を
@@ -57,22 +66,51 @@ $$;
 -- 1. テーブル
 -- ----------------------------------------------------------------------------
 
--- 週ごとのお題。1週に1つ。
-create table public.weekly_odai (
+-- AI に回答を作らせるお題。週1（全員共通）と相談（本人だけ）の2種類。
+create table public.ai_odai (
   id         bigint generated always as identity primary key,
-  week_start date not null unique,
+  kind       text not null check (kind in ('weekly', 'consult')),
+  -- weekly のみ。日本時間の月曜の日付
+  week_start date,
+  -- weekly のみ。お題ストック（odai）のどれから選んだか
   odai_id    bigint references public.odai (id) on delete set null,
-  text       text not null check (char_length(btrim(text)) > 0),
-  created_at timestamptz not null default now()
+  -- consult のみ。相談した人
+  owner_id   uuid references public.users (id) on delete cascade,
+  text       text not null check (char_length(btrim(text)) between 1 and 200),
+  created_at timestamptz not null default now(),
+  constraint ai_odai_weekly_has_week check ((kind = 'weekly') = (week_start is not null)),
+  constraint ai_odai_consult_has_owner check ((kind = 'consult') = (owner_id is not null))
 );
 
-comment on table public.weekly_odai is
-  '週1回のお題（全員共通）。odai（これまで貯めたお題）から自動で選ぶ。week_start は日本時間の月曜。';
+create unique index ai_odai_one_per_week on public.ai_odai (week_start) where kind = 'weekly';
+create index ai_odai_owner_idx on public.ai_odai (owner_id, created_at desc) where kind = 'consult';
+
+comment on table public.ai_odai is
+  'AI に回答を作らせるお題。weekly = 週1回の全員共通（odai から自動で選ぶ）、'
+  'consult = 1人が好きなときに出す相談（本人だけが見られる）。';
+
+-- このお題を見てよいか。weekly はメンバー全員、consult は本人だけ。
+create or replace function private.can_access_odai(p_ai_odai_id bigint)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.ai_odai o
+    where o.id = p_ai_odai_id
+      and (
+        (o.kind = 'weekly' and exists (select 1 from public.users u where u.id = (select auth.uid())))
+        or o.owner_id = (select auth.uid())
+      )
+  );
+$$;
 
 -- AI に回答を作らせた1回ぶん。同時に2人が作らせないための札も兼ねる。
 create table public.ai_batches (
   id              bigint generated always as identity primary key,
-  weekly_odai_id  bigint not null references public.weekly_odai (id) on delete cascade,
+  ai_odai_id  bigint not null references public.ai_odai (id) on delete cascade,
   status          text not null default 'generating'
                     check (status in ('generating', 'done', 'failed')),
   generator_model text,
@@ -82,19 +120,19 @@ create table public.ai_batches (
   finished_at     timestamptz
 );
 
-create index ai_batches_week_idx on public.ai_batches (weekly_odai_id, status);
+create index ai_batches_week_idx on public.ai_batches (ai_odai_id, status);
 
 -- AI が作った回答。審査役の点つき。
 create table public.ai_answers (
   id             bigint generated always as identity primary key,
-  weekly_odai_id bigint not null references public.weekly_odai (id) on delete cascade,
+  ai_odai_id bigint not null references public.ai_odai (id) on delete cascade,
   batch_id       bigint not null references public.ai_batches (id) on delete cascade,
   text           text not null check (char_length(btrim(text)) > 0),
   judge_score    smallint check (judge_score between 0 and 100),
   created_at     timestamptz not null default now()
 );
 
-create index ai_answers_week_idx on public.ai_answers (weekly_odai_id);
+create index ai_answers_week_idx on public.ai_answers (ai_odai_id);
 
 comment on column public.ai_answers.judge_score is
   '審査役の AI が付けた「メンバーに選ばれそうか」の点（0〜100）。見せる順を決める材料の一つ。';
@@ -102,16 +140,16 @@ comment on column public.ai_answers.judge_score is
 -- 1人に見せた10個。
 create table public.ai_sets (
   id             bigint generated always as identity primary key,
-  weekly_odai_id bigint not null references public.weekly_odai (id) on delete cascade,
+  ai_odai_id bigint not null references public.ai_odai (id) on delete cascade,
   user_id        uuid not null references public.users (id) on delete cascade,
   -- 選び終えた時刻。null のあいだは選んでいる途中。
   submitted_at   timestamptz,
   created_at     timestamptz not null default now()
 );
 
-create index ai_sets_user_idx on public.ai_sets (user_id, weekly_odai_id);
+create index ai_sets_user_idx on public.ai_sets (user_id, ai_odai_id);
 -- 選んでいる途中の10個は1人1つまで。
-create unique index ai_sets_one_open on public.ai_sets (user_id, weekly_odai_id)
+create unique index ai_sets_one_open on public.ai_sets (user_id, ai_odai_id)
   where submitted_at is null;
 
 -- 10個の中身。
@@ -140,23 +178,27 @@ comment on table public.ai_set_items is
 -- 選ぶ」が混ざり、合意が独立した判定でなくなる。集計値だけは関数越しに使う。
 -- ----------------------------------------------------------------------------
 
-alter table public.weekly_odai  enable row level security;
+alter table public.ai_odai  enable row level security;
 alter table public.ai_batches   enable row level security;
 alter table public.ai_answers   enable row level security;
 alter table public.ai_sets      enable row level security;
 alter table public.ai_set_items enable row level security;
 
-revoke all on public.weekly_odai, public.ai_batches, public.ai_answers,
+revoke all on public.ai_odai, public.ai_batches, public.ai_answers,
               public.ai_sets, public.ai_set_items
   from anon, authenticated;
-grant select on public.weekly_odai, public.ai_answers, public.ai_sets, public.ai_set_items
+grant select on public.ai_odai, public.ai_answers, public.ai_sets, public.ai_set_items
   to authenticated;
 
-create policy weekly_odai_select_member on public.weekly_odai
-  for select to authenticated using ((select private.is_member()));
+create policy ai_odai_select on public.ai_odai
+  for select to authenticated
+  using (
+    (kind = 'weekly' and (select private.is_member()))
+    or owner_id = (select auth.uid())
+  );
 
-create policy ai_answers_select_member on public.ai_answers
-  for select to authenticated using ((select private.is_member()));
+create policy ai_answers_select on public.ai_answers
+  for select to authenticated using (private.can_access_odai(ai_odai_id));
 
 create policy ai_sets_select_own on public.ai_sets
   for select to authenticated using (user_id = (select auth.uid()));
@@ -176,7 +218,7 @@ create policy ai_set_items_select_own on public.ai_set_items
 -- ----------------------------------------------------------------------------
 
 create or replace function public.ensure_weekly_odai()
-returns setof public.weekly_odai
+returns setof public.ai_odai
 language plpgsql
 security definer
 set search_path = ''
@@ -190,10 +232,10 @@ begin
     raise exception 'members only';
   end if;
 
-  if not exists (select 1 from public.weekly_odai where week_start = v_week) then
+  if not exists (select 1 from public.ai_odai where kind = 'weekly' and week_start = v_week) then
     select o.id, o.text into v_odai_id, v_text
     from public.odai o
-    where not exists (select 1 from public.weekly_odai w where w.odai_id = o.id)
+    where not exists (select 1 from public.ai_odai w where w.odai_id = o.id)
     order by random()
     limit 1;
 
@@ -203,24 +245,19 @@ begin
     end if;
 
     if v_odai_id is not null then
-      insert into public.weekly_odai (week_start, odai_id, text)
-      values (v_week, v_odai_id, v_text)
-      on conflict (week_start) do nothing;
+      insert into public.ai_odai (kind, week_start, odai_id, text)
+      values ('weekly', v_week, v_odai_id, left(v_text, 200))
+      on conflict (week_start) where kind = 'weekly' do nothing;
     end if;
   end if;
 
-  return query select * from public.weekly_odai where week_start = v_week;
+  return query select * from public.ai_odai where kind = 'weekly' and week_start = v_week;
 end;
 $$;
 
--- ----------------------------------------------------------------------------
--- 4. AI の回答づくり
---
--- 作らせる前に札（ai_batches）を取る。他の人が数分以内に取った札が生きていれば
--- 取れない（null を返す）。同じお題に何人もが同時に API を叩かないため。
--- ----------------------------------------------------------------------------
-
-create or replace function public.claim_ai_batch(p_weekly_odai_id bigint)
+-- 相談を始める。お題は本人だけが見られる。
+-- AI の呼び出しにはお金がかかるので、1人1日30件まで（アプリ側の CONSULT_DAILY_LIMIT と揃えること）。
+create or replace function public.create_consult(p_text text)
 returns bigint
 language plpgsql
 security definer
@@ -232,29 +269,60 @@ begin
   if not private.is_member() then
     raise exception 'members only';
   end if;
+  if (select count(*) from public.ai_odai
+      where owner_id = (select auth.uid()) and created_at > now() - interval '1 day') >= 30 then
+    raise exception 'daily consult limit reached';
+  end if;
+
+  insert into public.ai_odai (kind, owner_id, text)
+  values ('consult', (select auth.uid()), btrim(p_text))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 4. AI の回答づくり
+--
+-- 作らせる前に札（ai_batches）を取る。他の人が数分以内に取った札が生きていれば
+-- 取れない（null を返す）。同じお題に何人もが同時に API を叩かないため。
+-- ----------------------------------------------------------------------------
+
+create or replace function public.claim_ai_batch(p_ai_odai_id bigint)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id bigint;
+begin
+  if not private.can_access_odai(p_ai_odai_id) then
+    raise exception 'odai not found';
+  end if;
 
   -- 同じお題の札の取り合いを1列に並べる
-  perform 1 from public.weekly_odai where id = p_weekly_odai_id for update;
+  perform 1 from public.ai_odai where id = p_ai_odai_id for update;
   if not found then
-    raise exception 'weekly odai not found';
+    raise exception 'odai not found';
   end if;
 
   -- 途中で落ちた札は5分で失効させる
   update public.ai_batches
   set status = 'failed', finished_at = now()
-  where weekly_odai_id = p_weekly_odai_id
+  where ai_odai_id = p_ai_odai_id
     and status = 'generating'
     and started_at < now() - interval '5 minutes';
 
   if exists (
     select 1 from public.ai_batches
-    where weekly_odai_id = p_weekly_odai_id and status = 'generating'
+    where ai_odai_id = p_ai_odai_id and status = 'generating'
   ) then
     return null;
   end if;
 
-  insert into public.ai_batches (weekly_odai_id, started_by)
-  values (p_weekly_odai_id, (select auth.uid()))
+  insert into public.ai_batches (ai_odai_id, started_by)
+  values (p_ai_odai_id, (select auth.uid()))
   returning id into v_id;
   return v_id;
 end;
@@ -276,7 +344,7 @@ declare
   v_week_id bigint;
   v_n int := coalesce(array_length(p_texts, 1), 0);
 begin
-  select weekly_odai_id into v_week_id
+  select ai_odai_id into v_week_id
   from public.ai_batches
   where id = p_batch_id and started_by = (select auth.uid()) and status = 'generating'
   for update;
@@ -291,7 +359,7 @@ begin
     raise exception 'scores must match texts';
   end if;
 
-  insert into public.ai_answers (weekly_odai_id, batch_id, text, judge_score)
+  insert into public.ai_answers (ai_odai_id, batch_id, text, judge_score)
   select v_week_id, p_batch_id, btrim(t.text), greatest(0, least(100, t.score))
   from unnest(p_texts, p_scores) as t(text, score)
   where btrim(t.text) <> '';
@@ -314,7 +382,7 @@ $$;
 -- 誰が選んだかは返さない。
 -- ----------------------------------------------------------------------------
 
-create or replace function public.ai_answer_pool(p_weekly_odai_id bigint)
+create or replace function public.ai_answer_pool(p_ai_odai_id bigint)
 returns table (
   answer_id    bigint,
   text         text,
@@ -338,14 +406,14 @@ as $$
   from public.ai_answers a
   left join public.ai_set_items i on i.answer_id = a.id
   left join public.ai_sets s on s.id = i.set_id
-  where a.weekly_odai_id = p_weekly_odai_id
-    and private.is_member()
+  where a.ai_odai_id = p_ai_odai_id
+    and private.can_access_odai(p_ai_odai_id)
   group by a.id;
 $$;
 
 -- 10個を自分用に確保する。選んでいる途中の10個があれば作れない。
 create or replace function public.create_ai_set(
-  p_weekly_odai_id bigint,
+  p_ai_odai_id bigint,
   p_answer_ids     bigint[],
   p_slots          text[],
   p_expected       real[]
@@ -358,8 +426,8 @@ declare
   v_set_id bigint;
   v_n int := coalesce(array_length(p_answer_ids, 1), 0);
 begin
-  if not private.is_member() then
-    raise exception 'members only';
+  if not private.can_access_odai(p_ai_odai_id) then
+    raise exception 'odai not found';
   end if;
   if v_n not between 1 and 10
      or coalesce(array_length(p_slots, 1), 0) <> v_n
@@ -367,7 +435,7 @@ begin
     raise exception 'need 1..10 answers with slots';
   end if;
   if (select count(*) from public.ai_answers
-      where id = any (p_answer_ids) and weekly_odai_id = p_weekly_odai_id) <> v_n then
+      where id = any (p_answer_ids) and ai_odai_id = p_ai_odai_id) <> v_n then
     raise exception 'answers do not belong to this odai';
   end if;
   -- 一度見た回答は二度見せない（2回目の判定は1回目と独立でない）
@@ -379,8 +447,8 @@ begin
     raise exception 'already shown';
   end if;
 
-  insert into public.ai_sets (weekly_odai_id, user_id)
-  values (p_weekly_odai_id, (select auth.uid()))
+  insert into public.ai_sets (ai_odai_id, user_id)
+  values (p_ai_odai_id, (select auth.uid()))
   returning id into v_set_id;
 
   insert into public.ai_set_items (set_id, answer_id, position, slot, expected)
@@ -420,11 +488,12 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 6. 手本（書き手と審査役に見せる、過去の「選ばれた／選ばれなかった」）
 --
--- 過去の週で、見せた人のうち選んだ割合が高いもの（勝ち）と、何人にも見せたのに
--- 誰にも選ばれなかったもの（負け）。今週の分は ai_answer_pool から取る。
+-- 他のお題（週1・相談の両方）で、見せた人のうち選んだ割合が高いもの（勝ち）と、
+-- 見せたのに誰にも選ばれなかったもの（負け）。今のお題の分は ai_answer_pool から取る。
+-- 相談で本人が選んだものも手本に入る（審査役に渡すだけで、他の人の画面には出ない）。
 -- ----------------------------------------------------------------------------
 
-create or replace function public.ai_past_examples(p_exclude_weekly_odai_id bigint)
+create or replace function public.ai_past_examples(p_exclude_ai_odai_id bigint)
 returns table (odai_text text, answer text, shown_count int, picked_count int)
 language sql
 stable
@@ -438,15 +507,15 @@ as $$
     from public.ai_set_items i
     join public.ai_sets s on s.id = i.set_id and s.submitted_at is not null
     join public.ai_answers a on a.id = i.answer_id
-    join public.weekly_odai w on w.id = a.weekly_odai_id
-    where a.weekly_odai_id <> p_exclude_weekly_odai_id
+    join public.ai_odai w on w.id = a.ai_odai_id
+    where a.ai_odai_id <> p_exclude_ai_odai_id
       and private.is_member()
     group by w.text, a.id, a.text
   )
   (select * from stats where picked_count > 0
    order by picked_count::real / shown_count desc, picked_count desc limit 40)
   union all
-  (select * from stats where picked_count = 0 and shown_count >= 2
+  (select * from stats where picked_count = 0
    order by shown_count desc limit 30);
 $$;
 
@@ -481,54 +550,55 @@ security definer
 set search_path = ''
 as $$
   with items as (
-    select s.weekly_odai_id, s.user_id, s.id as set_id, i.slot, i.picked, a.judge_score
+    select s.ai_odai_id, s.user_id, s.id as set_id, i.slot, i.picked, a.judge_score
     from public.ai_sets s
     join public.ai_set_items i on i.set_id = s.id
     join public.ai_answers a on a.id = i.answer_id
     where s.submitted_at is not null
   ),
   firsts as (
-    select weekly_odai_id, user_id, count(*) filter (where picked) as hits
+    select ai_odai_id, user_id, count(*) filter (where picked) as hits
     from (
-      select s.weekly_odai_id, s.user_id, i.picked,
-             dense_rank() over (partition by s.weekly_odai_id, s.user_id order by s.created_at) as r
+      select s.ai_odai_id, s.user_id, i.picked,
+             dense_rank() over (partition by s.ai_odai_id, s.user_id order by s.created_at) as r
       from public.ai_sets s
       join public.ai_set_items i on i.set_id = s.id
       where s.submitted_at is not null
     ) x
     where r = 1
-    group by weekly_odai_id, user_id
+    group by ai_odai_id, user_id
   ),
   pairs as (
-    select p.weekly_odai_id,
+    select p.ai_odai_id,
            avg(case when p.judge_score > n.judge_score then 1.0
                     when p.judge_score = n.judge_score then 0.5
                     else 0.0 end) as acc
     from items p
     join items n on n.set_id = p.set_id and not n.picked
     where p.picked and p.judge_score is not null and n.judge_score is not null
-    group by p.weekly_odai_id
+    group by p.ai_odai_id
   )
   select
     w.week_start,
     w.text,
-    (select count(distinct user_id) from items where weekly_odai_id = w.id)::int,
-    (select count(distinct set_id) from items where weekly_odai_id = w.id)::int,
-    (select avg(hits) from firsts where weekly_odai_id = w.id)::real,
-    (select count(*) from items where weekly_odai_id = w.id and slot = 'top')::int,
-    (select count(*) from items where weekly_odai_id = w.id and slot = 'top' and picked)::int,
-    (select count(*) from items where weekly_odai_id = w.id and slot = 'explore')::int,
-    (select count(*) from items where weekly_odai_id = w.id and slot = 'explore' and picked)::int,
-    (select acc from pairs where weekly_odai_id = w.id)::real,
-    (select count(*) from public.ai_answers where weekly_odai_id = w.id)::int
-  from public.weekly_odai w
-  where private.is_member()
+    (select count(distinct user_id) from items where ai_odai_id = w.id)::int,
+    (select count(distinct set_id) from items where ai_odai_id = w.id)::int,
+    (select avg(hits) from firsts where ai_odai_id = w.id)::real,
+    (select count(*) from items where ai_odai_id = w.id and slot = 'top')::int,
+    (select count(*) from items where ai_odai_id = w.id and slot = 'top' and picked)::int,
+    (select count(*) from items where ai_odai_id = w.id and slot = 'explore')::int,
+    (select count(*) from items where ai_odai_id = w.id and slot = 'explore' and picked)::int,
+    (select acc from pairs where ai_odai_id = w.id)::real,
+    (select count(*) from public.ai_answers where ai_odai_id = w.id)::int
+  from public.ai_odai w
+  where w.kind = 'weekly'
+    and private.is_member()
   order by w.week_start desc;
 $$;
 
 -- 終わった週の「殿堂」: 見せた人のうち選んだ人が多かった回答。
 -- 今週の分は返さない（見えると、まだ選んでいる人の判定に混ざる）。
-create or replace function public.ai_hall_of_fame(p_weekly_odai_id bigint)
+create or replace function public.ai_hall_of_fame(p_ai_odai_id bigint)
 returns table (answer text, shown_count int, picked_count int)
 language sql
 stable
@@ -539,10 +609,11 @@ as $$
          count(*)::int,
          count(*) filter (where i.picked)::int
   from public.ai_answers a
-  join public.weekly_odai w on w.id = a.weekly_odai_id
+  join public.ai_odai w on w.id = a.ai_odai_id
   join public.ai_set_items i on i.answer_id = a.id
   join public.ai_sets s on s.id = i.set_id and s.submitted_at is not null
-  where a.weekly_odai_id = p_weekly_odai_id
+  where a.ai_odai_id = p_ai_odai_id
+    and w.kind = 'weekly'
     and w.week_start < private.current_week_start()
     and private.is_member()
   group by a.id, a.text
@@ -558,6 +629,10 @@ $$;
 
 revoke all on function private.is_member() from public, anon;
 revoke all on function private.current_week_start() from public, anon;
+revoke all on function private.can_access_odai(bigint) from public, anon;
+grant execute on function private.can_access_odai(bigint) to authenticated;
+revoke all on function public.create_consult(text) from public, anon;
+grant execute on function public.create_consult(text) to authenticated;
 grant execute on function private.is_member() to authenticated;
 grant execute on function private.current_week_start() to authenticated;
 

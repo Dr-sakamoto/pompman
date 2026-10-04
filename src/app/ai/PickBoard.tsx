@@ -7,12 +7,12 @@ import { ErrorText, Panel } from "@/components/ui";
 
 type Item = { answerId: number; text: string };
 
-export function WeekBoard({
-  weeklyId,
+export function PickBoard({
+  odaiId,
   setId,
   items,
 }: {
-  weeklyId: number;
+  odaiId: number;
   setId: number | null;
   items: Item[];
 }) {
@@ -20,13 +20,13 @@ export function WeekBoard({
 
   return (
     <form action={action} className="space-y-4">
-      <input type="hidden" name="weekly_odai_id" value={weeklyId} />
+      <input type="hidden" name="ai_odai_id" value={odaiId} />
       {setId != null ? (
         <PickList key={setId} setId={setId} items={items} pending={pending} />
       ) : (
         <Panel className="space-y-3">
           <p className="text-sm text-muted">
-            AI が大量に作った回答から、審査役が選び抜いた10個を見せます。
+            AI が大量に書いた回答から、審査役が選び抜いた10個を見せます。
           </p>
           <button
             type="submit"

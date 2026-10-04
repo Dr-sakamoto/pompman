@@ -24,17 +24,24 @@ export default async function StatsPage() {
   const [, { data }] = await Promise.all([requireMember(), supabase.rpc("ai_weekly_stats")]);
   const weeks = (data ?? []) as WeekStats[];
 
-  // 殿堂は終わった週の分しか返らない（今週の分は選んでいる人の判定に混ざるため）
+  // 殿堂は終わった週の分しか返らない（今週の分は選んでいる人の判定に混ざるため）。
+  // 新しい週から順に見て、最初に中身のあった週を出す。
   const { data: weeklyRows } = await supabase
-    .from("weekly_odai")
+    .from("ai_odai")
     .select("id, week_start")
+    .eq("kind", "weekly")
     .order("week_start", { ascending: false })
     .limit(2);
-  const lastWeek = (weeklyRows ?? [])[1] as { id: number; week_start: string } | undefined;
-  const { data: hallRows } = lastWeek
-    ? await supabase.rpc("ai_hall_of_fame", { p_weekly_odai_id: lastWeek.id })
-    : { data: [] };
-  const hall = (hallRows ?? []) as { answer: string; shown_count: number; picked_count: number }[];
+  let lastWeek: { id: number; week_start: string } | undefined;
+  let hall: { answer: string; shown_count: number; picked_count: number }[] = [];
+  for (const w of (weeklyRows ?? []) as { id: number; week_start: string }[]) {
+    const { data: hallRows } = await supabase.rpc("ai_hall_of_fame", { p_ai_odai_id: w.id });
+    if (hallRows && hallRows.length > 0) {
+      lastWeek = w;
+      hall = hallRows as typeof hall;
+      break;
+    }
+  }
   const lastWeekText = weeks.find((w) => w.week_start === lastWeek?.week_start)?.odai_text;
 
   return (
@@ -103,7 +110,7 @@ export default async function StatsPage() {
 
       {lastWeek && hall.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-bold text-muted">先週の殿堂{lastWeekText ? `「${lastWeekText}」` : ""}</h2>
+          <h2 className="text-sm font-bold text-muted">前の週の殿堂{lastWeekText ? `「${lastWeekText}」` : ""}</h2>
           <ul className="space-y-2">
             {hall.map((h, i) => (
               <li key={i} className="rounded-lg border border-line bg-panel px-4 py-3">
