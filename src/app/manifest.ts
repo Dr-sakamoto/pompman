@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "大喜利",
     short_name: "大喜利",
-    description: "身内で遊ぶ招待制の大喜利アプリ",
+    description: "AIが出す大喜利の回答から、面白いものを選ぶだけ",
     start_url: "/",
     scope: "/",
     display: "standalone",
