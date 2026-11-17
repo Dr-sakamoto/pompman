@@ -13,8 +13,9 @@ import { z } from "zod";
  * 鍛えたいのは審査役のほう（見せる10個の当たり率は、審査役が外れを捨てられるかで決まる）。
  */
 
-export const GENERATOR_MODEL = "claude-opus-5-5";
-export const JUDGE_MODEL = "claude-opus-5-5";
+// 費用を抑えるため、量と幅が仕事の書き手は最安の Haiku、目利きが仕事の審査役は Sonnet にする。
+export const GENERATOR_MODEL = "claude-haiku-5-5";
+export const JUDGE_MODEL = "claude-sonnet-5-5";
 export const ANSWERS_PER_BATCH = 40;
 
 /** 人間に見せた結果つきの回答（今週の分・過去の週の分のどちらにも使う）。 */
@@ -91,8 +92,7 @@ async function write(odai: string, thisWeek: Labeled[], past: Labeled[]): Promis
   const response = await client().beta.messages.parse({
     model: GENERATOR_MODEL,
     max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    // Haiku には断られた時に別のモデルで作り直す仕組み（fallbacks）が無いので付けない。
     output_config: { effort: "medium", format: betaZodOutputFormat(WriterSchema) },
     system: WRITER_SYSTEM,
     messages: [{ role: "user", content: parts.join("\n") }],
