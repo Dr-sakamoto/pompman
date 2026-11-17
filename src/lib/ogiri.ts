@@ -1,5 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
 /*
@@ -13,18 +12,48 @@ import { z } from "zod";
  * 鍛えたいのは審査役のほう（見せる10個の当たり率は、審査役が外れを捨てられるかで決まる）。
  */
 
-export const GENERATOR_MODEL = "claude-opus-5-5";
-export const JUDGE_MODEL = "claude-opus-5-5";
+// 無料枠で動かすため Gemini を使う。量と幅が仕事の書き手は Flash、目利きが仕事の審査役は
+// 無料枠でいちばん新しい世代のモデルにする。無料枠は回数に上限があり、送った内容が
+// Google の製品改善に使われる。
+export const GENERATOR_MODEL = "gemini-3.8-flash";
+export const JUDGE_MODEL = "gemini-4-hydrogen";
 export const ANSWERS_PER_BATCH = 40;
 
 /** 人間に見せた結果つきの回答（今週の分・過去の週の分のどちらにも使う）。 */
 export type Labeled = { odaiText?: string; text: string; shown: number; picked: number };
 
-function client(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY が設定されていません。Vercel の環境変数に追加してください。");
+function client(): GoogleGenAI {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY が設定されていません。Vercel の環境変数に追加してください。");
   }
-  return new Anthropic();
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+}
+
+/** Gemini に渡す JSON スキーマ。先頭の "$schema" は受け付けないことがあるので外す。 */
+function jsonSchemaFor(schema: z.ZodType): unknown {
+  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>;
+  return rest;
+}
+
+/** JSON で答えさせ、スキーマに合うかを確かめて返す。断られた・読めなかったときは null。 */
+async function askJson<T>(model: string, system: string, prompt: string, schema: z.ZodType<T>): Promise<T | null> {
+  const response = await client().models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      systemInstruction: system,
+      responseMimeType: "application/json",
+      responseJsonSchema: jsonSchemaFor(schema),
+    },
+  });
+  const text = response.text;
+  if (!text) return null;
+  try {
+    const parsed = schema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalize(text: string): string {
@@ -75,7 +104,8 @@ const WriterSchema = z.object({
 
 const JudgeSchema = z.object({
   scores: z
-    .array(z.object({ n: z.number().int().describe("回答の番号"), score: z.number().int() }))
+    // .int() にすると JSON スキーマに巨大な上下限が入るので、ただの数にして使う側で丸める。
+    .array(z.object({ n: z.number().describe("回答の番号"), score: z.number().describe("0〜100 の点") }))
     .describe("すべての回答の点。番号順。"),
 });
 
@@ -88,20 +118,9 @@ async function write(odai: string, thisWeek: Labeled[], past: Labeled[]): Promis
     `回答を${ANSWERS_PER_BATCH}個書いてください。ここまでに出た回答と同じもの・ほぼ同じものは書かないでください。`,
   ];
 
-  const response = await client().beta.messages.parse({
-    model: GENERATOR_MODEL,
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: { effort: "medium", format: betaZodOutputFormat(WriterSchema) },
-    system: WRITER_SYSTEM,
-    messages: [{ role: "user", content: parts.join("\n") }],
-  });
-  if (response.stop_reason === "refusal") {
-    throw new Error("このお題では回答を作れませんでした。");
-  }
-  if (!response.parsed_output) throw new Error("AI の応答を読み取れませんでした。");
-  return response.parsed_output.answers;
+  const output = await askJson(GENERATOR_MODEL, WRITER_SYSTEM, parts.join("\n"), WriterSchema);
+  if (!output) throw new Error("このお題では回答を作れませんでした。");
+  return output.answers;
 }
 
 async function judge(
@@ -121,23 +140,14 @@ async function judge(
     `${candidates.length}個すべてに点を付けてください。`,
   ];
 
-  const response = await client().beta.messages.parse({
-    model: JUDGE_MODEL,
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: { effort: "high", format: betaZodOutputFormat(JudgeSchema) },
-    system: JUDGE_SYSTEM,
-    messages: [{ role: "user", content: parts.join("\n") }],
-  });
-  if (response.stop_reason === "refusal" || !response.parsed_output) {
-    throw new Error("審査役が採点できませんでした。");
-  }
+  const output = await askJson(JUDGE_MODEL, JUDGE_SYSTEM, parts.join("\n"), JudgeSchema);
+  if (!output) throw new Error("審査役が採点できませんでした。");
 
   // 付け忘れた回答は最低点にする（見せる順位を上げないため）。
   const scores = candidates.map(() => 0);
-  for (const { n, score } of response.parsed_output.scores) {
-    if (n >= 1 && n <= candidates.length) scores[n - 1] = Math.max(0, Math.min(100, score));
+  for (const { n: rawN, score } of output.scores) {
+    const n = Math.round(rawN);
+    if (n >= 1 && n <= candidates.length) scores[n - 1] = Math.max(0, Math.min(100, Math.round(score)));
   }
   return scores;
 }
